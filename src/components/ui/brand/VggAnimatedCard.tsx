@@ -41,61 +41,67 @@ const DEFAULT_STACK_COLORS: string[] = [
 const DEFAULT_ITEMS: Testimonial[] = [
   {
     id: "t1",
-    company: "Harper & Co.",
+    company: "SIHOO",
     name: "Rishabh Jain",
     role: "(Marketing Manager)",
     quote:
-      "“Onboarding creators became much smoother, especially with built in communication and deliverable tracking”",
-    avatarSrc: "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image7.webp",
+      "“What stood out most was the quality of creators and the ease of collaboration. Our team saved countless hours on outreach and campaign coordination.”",
+    avatarSrc:
+      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image15.png",
     rating: 4.5,
   },
   {
     id: "t2",
-    company: "Nova Studio",
+    company: "Jackery",
     name: "Ayesha Khan",
     role: "(Brand Lead)",
     quote:
-      "“Approvals are clean, replies are fast, and the pipeline finally feels organized.”",
-    avatarSrc: "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image7.webp",
+      "“A reliable platform for brands looking to build authentic creator partnerships. The workflow is smooth, transparent, and results-driven.”",
+    avatarSrc:
+      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image16.png",
     rating: 5,
   },
   {
     id: "t3",
-    company: "Glow Cart",
+    company: "DREAME",
     name: "Arjun Mehta",
     role: "(Growth Manager)",
     quote:
-      "“We launched campaigns quicker and the reporting is super easy for the team.”",
-    avatarSrc: "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image7.webp",
+      "“The creator search filters are incredibly useful. It takes minutes instead of hours to find relevant influencers.”",
+    avatarSrc:
+      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image17.png",
     rating: 4,
   },
   {
     id: "t4",
-    company: "Pixel & Thread",
+    company: "Ancker",
     name: "Neha Sharma",
     role: "(Founder)",
     quote:
-      "“It looks premium, saves back-and-forth, and keeps everything in one place.”",
-    avatarSrc: "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image7.webp",
+      "“The quality of creators on CollabGlam has been impressive. We've built some great long-term partnerships through the platform.”",
+    avatarSrc:
+      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image18.png",
     rating: 4.5,
   },
   {
     id: "t5",
-    company: "Mint Media",
+    company: "VtoMAN",
     name: "Kabir Verma",
-    role: "(Partnerships)",
+    role: "(Partnerships Manager)",
     quote:
-      "“Creator onboarding is smooth, and deliverables are tracked without chaos.”",
-    avatarSrc: "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image7.webp",
+      "“One of the easiest platforms we've used for collaborations.”",
+    avatarSrc:
+      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image19.png",
     rating: 4.5,
   },
+  
 ];
 
-// Solid warm background (prevents dark/black bleed)
+// Solid warm background
 const CARD_BG =
   "linear-gradient(135deg, #F6C24B 0%, #F8D682 45%, #F9E6B2 100%)";
 
-// sessionStorage key (persists in the same tab; helps avoid repeats on refresh/page-change)
+// Stores last shown testimonial in the same browser tab
 const STORAGE_KEY = "vgg_testimonial_index";
 
 /** =========================
@@ -110,14 +116,16 @@ function Stars({ rating }: { rating: number }) {
     <div
       className={cn(
         "flex items-center gap-[6px]",
-        "text-[#6B4B00] drop-shadow-[0_2px_6px_rgba(140,95,0,0.25)]"
+        "text-[#6B4B00] drop-shadow-[0_2px_6px_rgba(140,95,0,0.25)]",
       )}
       aria-label={`Rating ${rating} out of 5`}
     >
       {Array.from({ length: full }).map((_, i) => (
         <Star key={`f-${i}`} size={22} weight="fill" />
       ))}
+
       {half ? <StarHalf size={22} weight="fill" /> : null}
+
       {Array.from({ length: empty }).map((_, i) => (
         <Star key={`e-${i}`} size={22} weight="regular" />
       ))}
@@ -213,13 +221,17 @@ const SVG_LIBRARY = [SvgTriangle, SvgArcs, SvgChain];
 function clampIndex(n: number, max: number) {
   if (!Number.isFinite(n)) return -1;
   if (max <= 0) return -1;
+
   return Math.max(0, Math.min(max - 1, n));
 }
 
 function getStoredIndex(): number {
+  if (typeof window === "undefined") return -1;
+
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return -1;
+
     const n = Number(raw);
     return Number.isFinite(n) ? n : -1;
   } catch {
@@ -228,6 +240,8 @@ function getStoredIndex(): number {
 }
 
 function setStoredIndex(n: number) {
+  if (typeof window === "undefined") return;
+
   try {
     sessionStorage.setItem(STORAGE_KEY, String(n));
   } catch {
@@ -237,13 +251,18 @@ function setStoredIndex(n: number) {
 
 function pickRandomExcluding(length: number, exclude: number) {
   if (length <= 1) return 0;
-  let r = Math.floor(Math.random() * length);
-  if (r === exclude) r = (r + 1) % length; // guarantees change
-  return r;
+
+  let next = Math.floor(Math.random() * length);
+
+  if (next === exclude) {
+    next = (next + 1) % length;
+  }
+
+  return next;
 }
 
 /** =========================
- * Main Component (NO animation)
+ * Main Component
  * ========================= */
 export function VggCardStack({
   items = DEFAULT_ITEMS,
@@ -257,32 +276,37 @@ export function VggCardStack({
   className?: string;
 }) {
   const pathname = usePathname();
+  const [activeIndex, setActiveIndex] = React.useState(0);
 
   const deck = React.useMemo<DeckCard[]>(
     () =>
-      items.map((t, i) => ({
-        id: `deck-${t.id}`,
-        color: stackColors[i % stackColors.length] || "rgba(255,255,255,0.14)",
-        decorIndex: i % SVG_LIBRARY.length,
-        data: t,
+      items.map((testimonial, index) => ({
+        id: `deck-${testimonial.id}`,
+        color:
+          stackColors[index % stackColors.length] || "rgba(255,255,255,0.14)",
+        decorIndex: index % SVG_LIBRARY.length,
+        data: testimonial,
       })),
-    [items, stackColors]
+    [items, stackColors],
   );
 
-  const [activeIndex, setActiveIndex] = React.useState(0);
-
-  // Change on refresh (mount) + on every route change
+  // Testimonial changes only on:
+  // 1. Page refresh / component mount
+  // 2. Route / page change
+  //
+  // No interval, no auto-refresh.
   React.useEffect(() => {
     if (!deck.length) return;
 
-    const prev = clampIndex(getStoredIndex(), deck.length);
-    const next = pickRandomExcluding(deck.length, prev);
+    const previousIndex = clampIndex(getStoredIndex(), deck.length);
+    const nextIndex = pickRandomExcluding(deck.length, previousIndex);
 
-    setStoredIndex(next);
-    setActiveIndex(next);
+    setStoredIndex(nextIndex);
+    setActiveIndex(nextIndex);
   }, [pathname, deck.length]);
 
   const card = deck[activeIndex];
+
   if (!card) return null;
 
   const Decor = SVG_LIBRARY[card.decorIndex] || SvgArcs;
@@ -292,7 +316,7 @@ export function VggCardStack({
       className={cn(
         "relative w-full max-w-[560px] flex items-center justify-center",
         "aspect-[560/458] lg:w-[560px] lg:h-[458px]",
-        className
+        className,
       )}
     >
       <div
@@ -303,7 +327,7 @@ export function VggCardStack({
         }}
         className={cn(
           "relative w-full h-full rounded-[32px] overflow-hidden",
-          "border-4 border-white/30 backdrop-blur-[17.5px]"
+          "border-4 border-white/30 backdrop-blur-[17.5px]",
         )}
       >
         <Decor
@@ -312,7 +336,7 @@ export function VggCardStack({
             "right-[-90px] sm:right-[-120px] lg:right-[-140px]",
             "top-[-20px] sm:top-[-30px] lg:top-[-40px]",
             "h-[420px] sm:h-[500px] lg:h-[560px] w-auto",
-            "opacity-20"
+            "opacity-20",
           )}
         />
 
@@ -321,14 +345,14 @@ export function VggCardStack({
             "relative z-[2] h-full flex flex-col",
             "px-[22px] sm:px-[34px] lg:px-[44px]",
             "pt-[22px] sm:pt-[34px] lg:pt-[44px]",
-            "pb-[22px] sm:pb-[34px] lg:pb-[44px]"
+            "pb-[22px] sm:pb-[34px] lg:pb-[44px]",
           )}
         >
-          <div className="flex items-start justify-between">
-            <div className="h-[68px] w-[68px] sm:h-[78px] sm:w-[78px] lg:h-[86px] lg:w-[86px] rounded-full overflow-hidden ring-2 ring-white/50">
+          <div className="flex items-start justify-between gap-4">
+            <div className="h-[68px] w-[68px] sm:h-[78px] sm:w-[78px] lg:h-[86px] lg:w-[86px] shrink-0 rounded-full overflow-hidden ring-2 ring-white/50">
               <img
                 src={card.data.avatarSrc}
-                alt="Testimonial avatar"
+                alt={`${card.data.name} testimonial avatar`}
                 width={118}
                 height={118}
                 className="h-full w-full object-cover"
@@ -336,7 +360,7 @@ export function VggCardStack({
               />
             </div>
 
-            <span className="mt-[6px] sm:mt-[8px] lg:mt-[10px] text-white font-semibold text-[16px] sm:text-[18px] lg:text-[20px] leading-[24px] sm:leading-[26px] lg:leading-[28px]">
+            <span className="mt-[6px] sm:mt-[8px] lg:mt-[10px] text-right text-white font-semibold text-[16px] sm:text-[18px] lg:text-[20px] leading-[24px] sm:leading-[26px] lg:leading-[28px]">
               {card.data.company}
             </span>
           </div>
@@ -349,7 +373,10 @@ export function VggCardStack({
                 <p className="text-[18px] sm:text-[19px] lg:text-[20px] font-bold text-[#3B2A0A]">
                   {card.data.name}
                 </p>
-                <p className="text-[12px] text-[#C28718]">{card.data.role}</p>
+
+                <p className="text-[12px] text-[#C28718]">
+                  {card.data.role}
+                </p>
               </div>
 
               <p className="mt-[10px] max-w-[280px] sm:max-w-[320px] lg:max-w-[380px] text-[13px] sm:text-[14px] leading-[20px] sm:leading-[22px] text-[#C28718]">

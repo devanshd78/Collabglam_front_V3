@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { CaretLeft, User, Camera } from "@phosphor-icons/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { FloatingInput } from "@/components/ui/floatingInput";
 import { Button, buttonVariants } from "@/components/ui/buttonComp";
@@ -185,6 +185,8 @@ type QA = { question: string; answers: string[] };
 export default function BrandOnboardingPage() {
   const router = useRouter();
 
+  const searchParams = useSearchParams();
+  const requestedStep = searchParams.get("step");
   type Step = "brandAlias" | "brandOnboarding";
   const [step, setStep] = React.useState<Step>("brandAlias");
 
@@ -212,6 +214,29 @@ export default function BrandOnboardingPage() {
   const [cropSrc, setCropSrc] = React.useState("");
   const [pendingFile, setPendingFile] = React.useState<File | null>(null);
   const fileRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    if (requestedStep === "brandAlias") {
+      setStep("brandAlias");
+      setOnboardStep(0);
+      return;
+    }
+
+    const onboardingStepMap: Record<string, number> = {
+      page1: 0,
+      page2: 1,
+      page3: 3,
+    };
+
+    if (!requestedStep) return;
+
+    const nextStepIndex = onboardingStepMap[requestedStep];
+
+    if (typeof nextStepIndex === "number") {
+      setStep("brandOnboarding");
+      setOnboardStep(nextStepIndex);
+    }
+  }, [requestedStep]);
 
   const brandPreviewRef = React.useRef<string>("");
   const cropSrcRef = React.useRef<string>("");
@@ -248,9 +273,15 @@ export default function BrandOnboardingPage() {
 
         setBrandName(draft.brandName || "");
         setPocName(draft.pocName || "");
+        setBrandEmail(draft.email || "");
 
-        if (draft.aliasSource) {
-          setBrandEmailAlias(draft.aliasSource);
+        const draftAlias =
+          draft.aliasSource ||
+          makeAliasFromEmail(draft.email || "") ||
+          makeAliasFromBrandName(draft.brandName || "");
+
+        if (draftAlias) {
+          setBrandEmailAlias(draftAlias);
         }
 
         if (googleProfilePic) {
@@ -576,10 +607,7 @@ export default function BrandOnboardingPage() {
             </button>
           </div>
         ),
-        isValid:
-          !!onboardData.brandImageFile ||
-          !!onboardData.googleProfilePicUrl ||
-          !!onboardData.brandImagePreview,
+        isValid: true,
       },
       {
         title: "What are your preferred platforms?",

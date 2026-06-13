@@ -61,6 +61,14 @@ type BrandSignInResponse = {
     page1Done?: boolean;
     page2Done?: boolean;
     page3Done?: boolean;
+
+    // Optional skip flags, supported if backend sends them.
+    ispage1Skip?: boolean;
+    ispage2Skip?: boolean;
+    ispage3Skip?: boolean;
+    page1Skipped?: boolean;
+    page2Skipped?: boolean;
+    page3Skipped?: boolean;
   };
 };
 
@@ -268,6 +276,66 @@ function routeToBrandPath(route?: OnboardingRoute) {
   }
 }
 
+function isStepPending(done?: boolean, ...skipFlags: Array<boolean | undefined>) {
+  if (done === true) return false;
+  if (skipFlags.some((flag) => flag === true)) return false;
+
+  return done === false;
+}
+
+function resolveBrandPostLoginRoute(
+  res?: BrandSignInResponse,
+): OnboardingRoute | undefined {
+  const route = res?.route;
+
+  if (
+    route === "brandAlias" ||
+    route === "page1" ||
+    route === "page2" ||
+    route === "page3"
+  ) {
+    return route;
+  }
+
+  const onboarding = res?.onboarding;
+
+  if (onboarding?.aliasDone === false) return "brandAlias";
+
+  if (
+    isStepPending(
+      onboarding?.page1Done,
+      onboarding?.ispage1Skip,
+      onboarding?.page1Skipped,
+    )
+  ) {
+    return "page1";
+  }
+
+  if (
+    isStepPending(
+      onboarding?.page2Done,
+      onboarding?.ispage2Skip,
+      onboarding?.page2Skipped,
+    )
+  ) {
+    return "page2";
+  }
+
+  // Profile pic is intentionally not checked here because it is optional.
+
+  if (
+    isStepPending(
+      onboarding?.page3Done,
+      onboarding?.ispage3Skip,
+      onboarding?.page3Skipped,
+    )
+  ) {
+    return "page3";
+  }
+
+  return route;
+}
+
 function normalizeReturnUrl(value?: string | null) {
   if (!value) return "";
 
@@ -421,10 +489,6 @@ function BrandLoginContentInner() {
     };
   }, [redirectAuthenticatedBrandUser]);
 
-  const getSafeReturnUrl = () => {
-    return getRequestedReturnUrl() || "/brand/dashboard";
-  };
-
   const getCreatorLoginHref = () => {
     const returnUrl = getRequestedReturnUrl();
 
@@ -440,13 +504,7 @@ function BrandLoginContentInner() {
       return returnUrl;
     }
 
-    const route = res?.route;
-
-    if (route === "page1" || route === "page2" || route === "page3") {
-      return routeToBrandPath(route);
-    }
-
-    return getSafeReturnUrl();
+    return routeToBrandPath(resolveBrandPostLoginRoute(res));
   };
 
   const clearEmailOnFocus = () => {
@@ -475,11 +533,14 @@ function BrandLoginContentInner() {
 
     return !(nextEmailError || nextPasswordError);
   };
+
   const persistBrandSession = async (res: BrandSignInResponse) => {
+    const nextRoute = resolveBrandPostLoginRoute(res);
+
     localStorage.setItem("token", res.token);
     localStorage.setItem("brandId", res.brandId);
 
-    persistBrandOnboardingRoute(res.route);
+    persistBrandOnboardingRoute(nextRoute);
 
     await fetch("/api-1/brand-auth", {
       method: "POST",
@@ -526,8 +587,7 @@ function BrandLoginContentInner() {
 
       const googleEmail = res.email || credential.user.email || "";
       const googleName = res.name || credential.user.displayName || "";
-      const googlePhoto =
-        res.profilePic || credential.user.photoURL || "";
+      const googlePhoto = res.profilePic || credential.user.photoURL || "";
       const aliasSource = makeAliasSourceFromEmail(googleEmail);
 
       localStorage.setItem(
@@ -543,12 +603,15 @@ function BrandLoginContentInner() {
         }),
       );
 
-      router.replace(routeToBrandPath(res.route));
+      router.replace(getPostLoginRedirect(res));
     } catch (err) {
       toast({
         icon: "error",
         title: "Google sign in failed",
-        text: getApiErrorMessage(err, "Google sign in failed. Please try again."),
+        text: getApiErrorMessage(
+          err,
+          "Google sign in failed. Please try again.",
+        ),
       });
     } finally {
       setGoogleLoading(false);
@@ -574,6 +637,20 @@ function BrandLoginContentInner() {
       )) as BrandSignInResponse;
 
       await persistBrandSession(res);
+      const loginEmail = res.email || emailTrimmed;
+      const aliasSource = makeAliasSourceFromEmail(loginEmail);
+
+      localStorage.setItem(
+        "brandSignupDraft",
+        JSON.stringify({
+          brandName: res.brandName || aliasSource || "Brand",
+          pocName: res.name || "",
+          email: loginEmail,
+          aliasSource,
+          profilePic: res.profilePic || "",
+          authProvider: "email",
+        }),
+      );
 
       router.replace(getPostLoginRedirect(res));
     } catch (err) {
@@ -692,7 +769,7 @@ function BrandLoginContentInner() {
                   <span className="text-xs text-[#969696]">or</span>
                   <div className="h-px flex-1 bg-[#E6E6E6]" />
                 </div>
-                
+
                 <FloatingInput
                   label="Email"
                   value={email}
