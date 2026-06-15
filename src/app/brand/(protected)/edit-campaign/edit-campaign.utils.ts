@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useMemo } from "react";
-import type { Platform, CampaignStatus } from "../../services/brandApi";
+import type {  CampaignStatus } from "../../services/brandApi";
 
 /* ============================================================================
    ✅ Types
@@ -200,16 +200,7 @@ export async function filesToDataUrls(files: File[]) {
 /* ============================================================================
    ✅ Platforms mapping
 ============================================================================ */
-export function mapPlatforms(ui: string[]): Platform[] {
-  const out: Platform[] = [];
-  for (const p of ui ?? []) {
-    const x = String(p).toLowerCase().trim();
-    if (x === "instagram") out.push("instagram");
-    if (x === "tiktok") out.push("tiktok");
-    if (x === "youtube") out.push("youtube");
-  }
-  return Array.from(new Set(out));
-}
+
 
 export function platformToUi(p: any) {
   const x = String(p ?? "").toLowerCase().trim();

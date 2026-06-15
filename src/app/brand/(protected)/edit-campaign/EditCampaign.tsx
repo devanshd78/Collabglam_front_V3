@@ -34,7 +34,6 @@ import {
     isValidDateRange,
     LAYOUT,
     MANUAL_PLATFORM_OPTIONS,
-    mapPlatforms,
     Option,
     pickCampaignId,
     platformToUi,
@@ -462,7 +461,6 @@ async function buildUpdateManualPayload(args: {
         contentFormats: form.contentFormats,
         contentLanguageIds: form.contentLanguage,
 
-        platformSelection: mapPlatforms(form.platforms),
 
         targetCountryIds: form.targetCountry,
         targetAgeRanges: form.targetAgeGroups,
