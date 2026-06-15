@@ -645,8 +645,6 @@ function buildCreateManualPayload(
     contentFormats: form.contentFormats,
     contentLanguageIds: form.contentLanguage,
 
-    platformSelection: mapPlatforms(form.platforms),
-
     targetCountryIds: form.targetCountry,
     targetAgeRanges: form.targetAgeGroups,
     preferredHashtags: form.hashtags,
