@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useCallback, useMemo } from "react";
-import type { Platform, CampaignStatus } from "../../services/brandApi";
 
 /* ============================================================================
    ✅ Types
@@ -55,9 +54,6 @@ export const CAMPAIGN_TYPES: Option[] = [
   { label: "Paid + Bonus", value: "Paid + Bonus" },
 ];
 
-export const MANUAL_PLATFORMS = ["Instagram", "TikTok", "YouTube"] as const;
-export const MANUAL_PLATFORM_OPTIONS: Option[] = MANUAL_PLATFORMS.map((p) => ({ label: p, value: p }));
-
 /* ============================================================================
    ✅ File rules
 ============================================================================ */
@@ -75,6 +71,39 @@ export function validateFiles(files: File[], label = "File") {
 /* ============================================================================
    ✅ Dates + IDs + misc helpers
 ============================================================================ */
+export function getLocalCampaignTimezone() {
+  if (typeof window === "undefined") return "UTC";
+
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+export function toCampaignDateTimeInput(
+  dateValue?: string,
+  type: "start" | "end" = "start"
+) {
+  const date = safeDateInput(dateValue);
+  if (!date) return "";
+
+  if (type === "end") {
+    return `${date}T23:59`;
+  }
+
+  const today = safeDateInput(new Date().toISOString());
+
+  if (date === today) {
+    const step = 15 * 60 * 1000;
+    const buffer = 5 * 60 * 1000;
+    const rounded = new Date(Math.ceil((Date.now() + buffer) / step) * step);
+
+    const hh = String(rounded.getHours()).padStart(2, "0");
+    const mm = String(rounded.getMinutes()).padStart(2, "0");
+
+    return `${date}T${hh}:${mm}`;
+  }
+
+  return `${date}T09:00`;
+}
+
 export function isValidDateRange(start?: string, end?: string) {
   if (!start || !end) return true;
   const s = new Date(start).getTime();
@@ -195,28 +224,6 @@ export async function filesToDataUrls(files: File[]) {
   const out: any[] = [];
   for (const f of files ?? []) out.push(await fileToDataUrl(f));
   return out;
-}
-
-/* ============================================================================
-   ✅ Platforms mapping
-============================================================================ */
-export function mapPlatforms(ui: string[]): Platform[] {
-  const out: Platform[] = [];
-  for (const p of ui ?? []) {
-    const x = String(p).toLowerCase().trim();
-    if (x === "instagram") out.push("instagram");
-    if (x === "tiktok") out.push("tiktok");
-    if (x === "youtube") out.push("youtube");
-  }
-  return Array.from(new Set(out));
-}
-
-export function platformToUi(p: any) {
-  const x = String(p ?? "").toLowerCase().trim();
-  if (x === "instagram") return "Instagram";
-  if (x === "tiktok") return "TikTok";
-  if (x === "youtube") return "YouTube";
-  return "";
 }
 
 /* ============================================================================

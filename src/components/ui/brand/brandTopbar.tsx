@@ -622,7 +622,7 @@ const crumbs = useMemo(() => {
                 }}
                 className="inline-flex h-10 items-center gap-1.5 rounded-lg px-2.5 text-[#1A1A1A] transition hover:bg-neutral-50"
               >
-                <img src="/images/star_coin.png" alt="star_coin" className="h-6 w-6" />
+                <img src="/images/bolt.png" alt="star_coin" className="h-6 w-6" />
                 <span className="text-[13px] sm:text-[14px] font-semibold text-[#1A1A1A]">
                   {remainingCredits}
                 </span>

@@ -1,6 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Swal from "sweetalert2";
 
@@ -25,8 +34,11 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import {
+  CaretDown,
   CircleNotch,
   EnvelopeOpen,
+  FileArrowUp,
+  FileText,
   PaperPlaneTilt,
   Signature,
 } from "@phosphor-icons/react";
@@ -63,6 +75,19 @@ type ContractMeta = {
   _id: string;
   contractId: string;
   campaignId: string;
+  contractSource?: "template" | "uploaded";
+  document?: {
+    documentSource?: "template" | "uploaded";
+    uploadedContract?: {
+      originalName?: string;
+      bucket?: string;
+      folder?: string;
+      key?: string;
+      mimeType?: string;
+      sizeBytes?: number;
+      uploadedAt?: string | null;
+    } | null;
+  };
   status?: string;
   requestedEffectiveDate?: string | null;
   requestedEffectiveDateTimezone?: string | null;
@@ -89,8 +114,6 @@ export const PAYMENT_TYPE = {
 } as const;
 
 export type PaymentType = (typeof PAYMENT_TYPE)[keyof typeof PAYMENT_TYPE];
-
-type PanelMode = "send" | "edit" | "bulk-send";
 
 type CampaignFeedbackPayload = {
   campaignId: string;
@@ -240,7 +263,6 @@ function buildAvailablePlatforms(a: any): InfluencerRow["platforms"] {
     result.push({
       platform,
       followers: Number(followersValue ?? 0) || 0,
-      // engagement: toEngagementPercent(engagementValue),
     });
   };
 
@@ -270,12 +292,12 @@ function mapAcceptedAdminCreatedInfluencerToRow(a: any): InfluencerRow {
   const platform = normalizePlatformType(a?.platform);
   const platforms = platform
     ? [
-      {
-        platform,
-        followers: Number(a?.maxFollowers ?? a?.minFollowers ?? 0) || 0,
-        engagement: 0,
-      },
-    ]
+        {
+          platform,
+          followers: Number(a?.maxFollowers ?? a?.minFollowers ?? 0) || 0,
+          engagement: 0,
+        },
+      ]
     : [];
 
   return {
@@ -302,16 +324,11 @@ function mapAcceptedAdminCreatedInfluencerToRow(a: any): InfluencerRow {
 
 function mapCampaignInvitationToActiveRow(inv: any): InfluencerRow {
   const influencerId = String(
-    inv?.influencerId ||
-    inv?.influencer?._id ||
-    inv?.influencer?.id ||
-    ""
+    inv?.influencerId || inv?.influencer?._id || inv?.influencer?.id || ""
   ).trim();
 
   const name = String(
-    inv?.influencerName ||
-    inv?.influencer?.name ||
-    "Influencer"
+    inv?.influencerName || inv?.influencer?.name || "Influencer"
   ).trim();
 
   const createdAtRaw = inv?.createdAt ? String(inv.createdAt) : "";
@@ -320,12 +337,12 @@ function mapCampaignInvitationToActiveRow(inv: any): InfluencerRow {
   const platform = normalizePlatformType(inv?.platform);
   const platforms = platform
     ? [
-      {
-        platform,
-        followers: Number(inv?.followers ?? inv?.audienceSize ?? 0) || 0,
-        engagement: 0,
-      },
-    ]
+        {
+          platform,
+          followers: Number(inv?.followers ?? inv?.audienceSize ?? 0) || 0,
+          engagement: 0,
+        },
+      ]
     : [];
 
   return {
@@ -400,9 +417,9 @@ function isRejectedMeta(meta?: ContractMeta | null) {
 function hasExistingContract(raw: any, meta?: ContractMeta | null) {
   return Boolean(
     meta?.contractId ||
-    raw?.contractId ||
-    Number(raw?.isAssigned) === 1 ||
-    Number(raw?.isContracted) === 1
+      raw?.contractId ||
+      raw?.contractMongoId ||
+      Number(raw?.isContracted) === 1
   );
 }
 
@@ -441,6 +458,13 @@ function hasMilestonesCreated(meta?: ContractMeta | null) {
   );
 }
 
+function isUploadedOwnContract(meta?: ContractMeta | null) {
+  return (
+    meta?.contractSource === "uploaded" ||
+    meta?.document?.documentSource === "uploaded"
+  );
+}
+
 function getProfessionalContractStatusMessage(
   raw: any,
   meta?: ContractMeta | null
@@ -458,37 +482,26 @@ function getProfessionalContractStatusMessage(
   switch (status) {
     case CONTRACT_STATUS.DRAFT:
       return "Draft Saved";
-
     case CONTRACT_STATUS.BRAND_SENT_DRAFT:
       return "Contract Sent";
-
     case CONTRACT_STATUS.BRAND_EDITED:
       return "Updated by Brand";
-
     case CONTRACT_STATUS.INFLUENCER_EDITED:
       return "Changes Requested by Influencer";
-
     case CONTRACT_STATUS.BRAND_ACCEPTED:
       return "Accepted by Brand";
-
     case CONTRACT_STATUS.INFLUENCER_ACCEPTED:
       return "Accepted by Influencer";
-
     case CONTRACT_STATUS.READY_TO_SIGN:
       return "Ready for Signature";
-
     case CONTRACT_STATUS.CONTRACT_SIGNED:
       return "Contract Signed";
-
     case CONTRACT_STATUS.MILESTONES_CREATED:
       return "Milestones Created";
-
     case CONTRACT_STATUS.REJECTED:
       return "Contract Declined";
-
     case CONTRACT_STATUS.SUPERSEDED:
       return "Superseded";
-
     default:
       return "Contract in Progress";
   }
@@ -500,6 +513,7 @@ function getPrimaryAction(raw: any, meta?: ContractMeta | null): { label: string
 
   if (!hasExistingContract(raw, meta)) return { label: "Send Contract", viewOnly: false };
   if (isRejectedMeta(meta)) return { label: "Resend Contract", viewOnly: false };
+  if (isUploadedOwnContract(meta)) return { label: "View Contract", viewOnly: true };
   if (locked) return { label: "View Contract", viewOnly: true };
   if (isEditableStatus(statusStr)) return { label: "Update Contract", viewOnly: false };
   return { label: "View Contract", viewOnly: true };
@@ -541,6 +555,9 @@ const askConfirm = async (title: string, text?: string) => {
 function ActionButtons({
   primaryLabel,
   onPrimary,
+  contractChoiceMode,
+  onUseTemplate,
+  onUploadOwnContract,
   onManage,
   onMail,
   moreMenu,
@@ -554,9 +571,12 @@ function ActionButtons({
 }: {
   primaryLabel: string;
   onPrimary: () => void;
+  contractChoiceMode?: boolean;
+  onUseTemplate?: () => void;
+  onUploadOwnContract?: () => void;
   onManage: () => void;
   onMail: () => void;
-  moreMenu?: React.ReactNode;
+  moreMenu?: ReactNode;
   showAccept?: boolean;
   onAccept?: () => void;
   showSign?: boolean;
@@ -565,31 +585,149 @@ function ActionButtons({
   onViewContract?: () => void;
   isViewContractLoading?: boolean;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  const updateMenuPosition = useCallback(() => {
+    const button = buttonRef.current;
+    if (!button || typeof window === "undefined") return;
+
+    const rect = button.getBoundingClientRect();
+    const menuWidth = 224;
+    const menuHeight = 100;
+    const gap = 6;
+
+    let left = rect.left;
+    let top = rect.bottom + gap;
+
+    if (left + menuWidth > window.innerWidth - 8) {
+      left = window.innerWidth - menuWidth - 8;
+    }
+
+    if (top + menuHeight > window.innerHeight - 8) {
+      top = rect.top - menuHeight - gap;
+    }
+
+    setMenuPosition({
+      top: Math.max(8, top),
+      left: Math.max(8, left),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    updateMenuPosition();
+
+    const close = (e: MouseEvent) => {
+      const target = e.target as Node;
+
+      if (
+        menuRef.current?.contains(target) ||
+        buttonRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      setMenuOpen(false);
+    };
+
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menuOpen, updateMenuPosition]);
+
+  const handlePrimaryClick = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (contractChoiceMode) {
+      updateMenuPosition();
+      setMenuOpen((prev) => !prev);
+      return;
+    }
+
+    onPrimary();
+  };
+
+  const contractChoiceMenu =
+    typeof document !== "undefined" && contractChoiceMode && menuOpen
+      ? createPortal(
+          <div
+            ref={menuRef}
+            style={{ top: menuPosition.top, left: menuPosition.left }}
+            className="fixed z-[99999] w-56 overflow-hidden rounded-m border border-gray-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen(false);
+                onUploadOwnContract?.();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-gray-800 hover:bg-gray-50"
+            >
+              <FileArrowUp size={15} />
+              Upload Own Contract
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen(false);
+                onUseTemplate?.();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-gray-800 hover:bg-gray-50"
+            >
+              <FileText size={15} />
+              Use Template
+            </button>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
     <div className="flex min-w-max flex-nowrap items-center gap-2 whitespace-nowrap [&>button]:shrink-0">
       <button
+        ref={buttonRef}
         type="button"
-        onClick={onPrimary}
-        className="inline-flex h-8 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]"
+        onClick={handlePrimaryClick}
+        className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]"
       >
         {primaryLabel}
+        {contractChoiceMode ? <CaretDown size={12} weight="bold" /> : null}
       </button>
 
-      {/* {showAccept && onAccept ? (
-        <button
-          type="button"
-          onClick={onAccept}
-          className="inline-flex h-8 items-center justify-center gap-1 rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]"
-        >
-          <SealCheck size={14} weight="fill" className="text-emerald-600" />
-          Accept
-        </button>
-      ) : null} */}
+      {contractChoiceMenu}
+
+      {showAccept && onAccept ? null : null}
 
       {showSign && onSign ? (
         <button
           type="button"
-          onClick={onSign}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSign();
+          }}
           className="inline-flex h-8 items-center justify-center gap-1 rounded-[0.5rem] bg-[#1A1A1A] px-3 text-[12px] font-medium text-white hover:opacity-90"
         >
           <Signature size={14} />
@@ -599,23 +737,34 @@ function ActionButtons({
 
       <button
         type="button"
-        onClick={onManage}
+        onClick={(e) => {
+          e.stopPropagation();
+          onManage();
+        }}
         className="inline-flex h-8 items-center justify-center rounded-[0.5rem] bg-[#1A1A1A] px-4 text-[12px] font-medium text-white hover:opacity-90"
       >
         Manage
       </button>
+
       {showViewContract && onViewContract ? (
         <button
           type="button"
-          onClick={onViewContract}
+          onClick={(e) => {
+            e.stopPropagation();
+            onViewContract();
+          }}
           className="inline-flex h-8 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]"
         >
-          {isViewContractLoading ? "Opening…" : "View Contract"}  {/* ← use own flag */}
+          {isViewContractLoading ? "Opening…" : "View Contract"}
         </button>
       ) : null}
+
       <button
         type="button"
-        onClick={onMail}
+        onClick={(e) => {
+          e.stopPropagation();
+          onMail();
+        }}
         aria-label="Open inbox"
         className="relative flex h-8 w-8 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white hover:bg-[#F7F7F7]"
       >
@@ -657,7 +806,7 @@ function ActiveMilestoneActions({
   showSendFeedback?: boolean;
   onManage: () => void;
   onMail: () => void;
-  moreMenu?: React.ReactNode;
+  moreMenu?: ReactNode;
   showAccept?: boolean;
   onAccept?: () => void;
   showSign?: boolean;
@@ -720,16 +869,7 @@ function ActiveMilestoneActions({
         ) : null}
       </div>
 
-      {/* {showAccept && onAccept ? (
-        <button
-          type="button"
-          onClick={onAccept}
-          className="inline-flex h-8 items-center gap-2 justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]"
-        >
-          <span>Final Edit</span>
-          <PencilSimpleIcon size={16} />
-        </button>
-      ) : null} */}
+      {showAccept && onAccept ? null : null}
 
       {showSign && onSign ? (
         <button
@@ -1009,6 +1149,9 @@ export default function InfluencerList() {
   const [signOpen, setSignOpen] = useState(false);
   const [signTargetMeta, setSignTargetMeta] = useState<ContractMeta | null>(null);
   const [viewingPdfForId, setViewingPdfForId] = useState<string | null>(null);
+  const ownContractInputRef = useRef<HTMLInputElement | null>(null);
+  const [ownContractTargetRow, setOwnContractTargetRow] = useState<InfluencerRow | null>(null);
+  const [uploadingContractForId, setUploadingContractForId] = useState<string | null>(null);
 
   const [milestoneCreatedMap, setMilestoneCreatedMap] = useState<Record<string, boolean>>({});
   const [milestoneTargetRow, setMilestoneTargetRow] = useState<InfluencerRow | null>(null);
@@ -1016,18 +1159,15 @@ export default function InfluencerList() {
   const [campaignFeedbackPromptMap, setCampaignFeedbackPromptMap] = useState<Record<string, boolean>>({});
   const [campaignFeedbackRefreshKey, setCampaignFeedbackRefreshKey] = useState(0);
 
-  // ── Bulk selection state ────────────────────────────────────────────────────
   const [selectedBulkIds, setSelectedBulkIds] = useState<string[]>([]);
   const [bulkInfluencerNames, setBulkInfluencerNames] = useState<string[]>([]);
 
-  // ── Payout type dialog state ────────────────────────────────────────────────
   const [isPayoutTypeDialogOpen, setIsPayoutTypeDialogOpen] = useState(false);
   const [payoutDialogMode, setPayoutDialogMode] = useState<"bulk" | "single" | null>(null);
   const [pendingInfluencerForContract, setPendingInfluencerForContract] = useState<any | null>(null);
-  const [campaignPayoutType, setCampaignPayoutType] = useState<string>("");
+  const [, setCampaignPayoutType] = useState<string>("");
   const campaignPayoutTypeRef = useRef<string>("");
 
-  // ── Bulk sidebar state ──────────────────────────────────────────────────────
   const [bulkSidebarOpen, setBulkSidebarOpen] = useState(false);
   const [bulkTargets, setBulkTargets] = useState<any[]>([]);
   const [bulkForcedPaymentType, setBulkForcedPaymentType] = useState<PaymentType | undefined>(undefined);
@@ -1047,22 +1187,22 @@ export default function InfluencerList() {
   }, [searchParams]);
 
   const isFullyManagedMode = useMemo(() => {
-  return searchParams.get("fm") === "1";
-}, [searchParams]);
+    return searchParams.get("fm") === "1";
+  }, [searchParams]);
 
-useEffect(() => {
-  if (!isFullyManagedMode) return;
+  useEffect(() => {
+    if (!isFullyManagedMode) return;
 
-  setFilters((prev) => ({
-    ...prev,
-    "Influencer Type": "",
-    "Engagement Rate": "",
-    Follower: "",
-    Category: [],
-    Platform: [],
-    Date: "",
-  }));
-}, [isFullyManagedMode]);
+    setFilters((prev) => ({
+      ...prev,
+      "Influencer Type": "",
+      "Engagement Rate": "",
+      Follower: "",
+      Category: [],
+      Platform: [],
+      Date: "",
+    }));
+  }, [isFullyManagedMode]);
 
   const tableVariant = useMemo(() => {
     if (tab === "shortlisted") return "shortlisted";
@@ -1070,7 +1210,6 @@ useEffect(() => {
     return "default";
   }, [tab]);
 
-  // ── Init brand id & saved payout type ─────────────────────────────────────
   useEffect(() => {
     const id =
       localStorage.getItem("brandId") ||
@@ -1107,25 +1246,20 @@ useEffect(() => {
 
         setIsAdminCreatedCampaign(createdByRole === "admin");
       } catch {
-        if (!cancelled) {
-          setIsAdminCreatedCampaign(false);
-        }
+        if (!cancelled) setIsAdminCreatedCampaign(false);
       }
     };
 
     run();
-
     return () => {
       cancelled = true;
     };
   }, [brandId, campaignId]);
 
-  // ── Reset pagination on tab / search change ────────────────────────────────
   useEffect(() => {
     setVisibleCount(PAGE_LIMIT);
   }, [tab, search]);
 
-  // ── Fetch campaign summary ─────────────────────────────────────────────────
   useEffect(() => {
     if (!campaignId) return;
     (async () => {
@@ -1138,11 +1272,12 @@ useEffect(() => {
         setCampaignTitle(campaignName);
         if (!Number.isNaN(budgetNum)) setCampaignBudget(budgetNum);
         if (data.timeline) setCampaignTimeline(data.timeline);
-      } catch { /* ignore */ }
+      } catch {
+        // ignore
+      }
     })();
   }, [campaignId]);
 
-  // ── Filter / sort helpers ──────────────────────────────────────────────────
   function getFilterStatusFromTab(tab: Tab): "all" | "applied" | "active" | "shortlisted" | "undecided" | "rejected" {
     if (tab === "applied") return "applied";
     if (tab === "active") return "active";
@@ -1218,7 +1353,6 @@ useEffect(() => {
     return 0;
   }
 
-  // ── Fetch applicants ───────────────────────────────────────────────────────
   const fetchApplicants = useCallback(async () => {
     if (!campaignId) {
       setApplicantRows([]);
@@ -1238,19 +1372,14 @@ useEffect(() => {
     try {
       const trimmedSearch = search.trim();
       if (tab === "active") {
-        const selectedCategoryIds = (filters.Category || []).filter(
-          (v) => v && v !== "All"
-        );
+        const selectedCategoryIds = (filters.Category || []).filter((v) => v && v !== "All");
 
         const selectedInvitationPlatforms = (filters.Platform || [])
           .filter((v) => v && v !== "All")
           .map((v) => normalizePlatformType(v))
           .filter(Boolean) as PlatformType[];
 
-        const singleInvitationPlatform =
-          selectedInvitationPlatforms.length === 1
-            ? selectedInvitationPlatforms[0]
-            : undefined;
+        const singleInvitationPlatform = selectedInvitationPlatforms.length === 1 ? selectedInvitationPlatforms[0] : undefined;
 
         const applyPayload: any = {
           campaignId,
@@ -1267,15 +1396,10 @@ useEffect(() => {
           sortOrder: getApiSortOrder(sortValue),
         };
 
-        if (isAdminCreatedCampaign) {
-          applyPayload.createdPage = "fullyManaged";
-        }
+        if (isAdminCreatedCampaign) applyPayload.createdPage = "fullyManaged";
 
-        if (selectedCategoryIds.length === 1) {
-          applyPayload.categoryId = selectedCategoryIds[0];
-        } else if (selectedCategoryIds.length > 1) {
-          applyPayload.categoryIds = selectedCategoryIds;
-        }
+        if (selectedCategoryIds.length === 1) applyPayload.categoryId = selectedCategoryIds[0];
+        else if (selectedCategoryIds.length > 1) applyPayload.categoryIds = selectedCategoryIds;
 
         const invitationPayload: any = {
           brandId,
@@ -1305,11 +1429,9 @@ useEffect(() => {
               return mapApplicantToRow({
                 ...inf,
                 isAccepted: 1,
-                lifecycleStatusRaw:
-                  inf?.lifecycleStatusRaw || "INFLUENCER_ACCEPTED",
+                lifecycleStatusRaw: inf?.lifecycleStatusRaw || "INFLUENCER_ACCEPTED",
               });
             }
-
             return mapAcceptedAdminCreatedInfluencerToRow(inf);
           })
           .filter((r: InfluencerRow) => String((r as any)?.id ?? "").trim());
@@ -1330,51 +1452,29 @@ useEffect(() => {
             const email = String(raw?.influencerEmail || "").toLowerCase();
             const q = trimmedSearch.toLowerCase();
 
-            if (q && !name.includes(q) && !handle.includes(q) && !email.includes(q)) {
-              return false;
-            }
+            if (q && !name.includes(q) && !handle.includes(q) && !email.includes(q)) return false;
 
             if (selectedInvitationPlatforms.length > 0) {
               const rowPlatforms = (row.platforms || [])
                 .map((p: any) => normalizePlatformType(p?.platform))
                 .filter(Boolean);
-
-              return rowPlatforms.some((p) =>
-                selectedInvitationPlatforms.includes(p as PlatformType)
-              );
+              return rowPlatforms.some((p) => selectedInvitationPlatforms.includes(p as PlatformType));
             }
 
             return true;
           });
 
         const mergedMap = new Map<string, InfluencerRow>();
-
-        applyMapped.forEach((row: InfluencerRow) => {
-          mergedMap.set(String(row.id), row);
-        });
-
+        applyMapped.forEach((row: InfluencerRow) => mergedMap.set(String(row.id), row));
         invitationMapped.forEach((row: InfluencerRow) => {
           const id = String(row.id);
-
-          // Avoid duplicate influencer rows when the same influencer exists in both APIs.
-          if (!mergedMap.has(id)) {
-            mergedMap.set(id, row);
-          }
+          if (!mergedMap.has(id)) mergedMap.set(id, row);
         });
 
         const merged = Array.from(mergedMap.values());
-
         const statusCounts = applyRes?.statusCounts ?? applyRes?.data?.statusCounts ?? {};
-        const applyTotal =
-          applyRes?.applicantCount ??
-          applyRes?.total ??
-          applyRes?.data?.applicantCount ??
-          applyRes?.data?.total ??
-          applyMapped.length;
-
-        const invitationOnlyCount = invitationMapped.filter(
-          (row: InfluencerRow) => !applyMapped.some((a: InfluencerRow) => a.id === row.id)
-        ).length;
+        const applyTotal = applyRes?.applicantCount ?? applyRes?.total ?? applyRes?.data?.applicantCount ?? applyRes?.data?.total ?? applyMapped.length;
+        const invitationOnlyCount = invitationMapped.filter((row: InfluencerRow) => !applyMapped.some((a: InfluencerRow) => a.id === row.id)).length;
 
         setCounts({
           all: Number(applyTotal || 0) + invitationOnlyCount,
@@ -1389,8 +1489,7 @@ useEffect(() => {
         return;
       }
 
-      // Existing flow for normal campaigns / other tabs
-      const tabStatus = getFilterStatusFromTab(tab);  // "applied" | "active" | "shortlisted" | "undecided" | "rejected" | "all"
+      const tabStatus = getFilterStatusFromTab(tab);
       const influencerTypeStatus = getFilterStatusFromInfluencerType(filters["Influencer Type"]);
       const effectiveFilterStatus = tab === "all" ? (influencerTypeStatus ?? "all") : tabStatus;
       const selectedCategoryIds = (filters.Category || []).filter((v) => v && v !== "All");
@@ -1427,9 +1526,7 @@ useEffect(() => {
           return !isAccepted && !isShortlisted && !isUndicided && !isRejected;
         }).length;
 
-      const activeCount =
-        res?.statusCounts?.active ??
-        influencers.filter((inf: any) => Number(inf?.isAccepted) === 1).length;
+      const activeCount = res?.statusCounts?.active ?? influencers.filter((inf: any) => Number(inf?.isAccepted) === 1).length;
 
       setCounts({
         all: totalCount,
@@ -1444,9 +1541,7 @@ useEffect(() => {
         .map(mapApplicantToRow)
         .filter((r: InfluencerRow) => String((r as any)?.id ?? "").trim());
 
-      mapped = mapped.filter((row: InfluencerRow) =>
-        doesApplicantBelongToTab((row as any)?.__raw ?? {}, tab)
-      );
+      mapped = mapped.filter((row: InfluencerRow) => doesApplicantBelongToTab((row as any)?.__raw ?? {}, tab));
 
       const map = new Map<string, InfluencerRow>();
       mapped.forEach((r: InfluencerRow) => map.set(String((r as any).id), r));
@@ -1462,7 +1557,6 @@ useEffect(() => {
     fetchApplicants();
   }, [fetchApplicants]);
 
-  // ── Contract meta helpers ──────────────────────────────────────────────────
   const getLatestContractForApplicant = useCallback(
     async (rawApplicant: any): Promise<ContractMeta | null> => {
       if (!brandId || !campaignId || !rawApplicant?.influencerId) return null;
@@ -1481,8 +1575,6 @@ useEffect(() => {
     },
     [brandId, campaignId]
   );
-
-
 
   const loadContractMeta = useCallback(
     async (rows: InfluencerRow[]) => {
@@ -1511,7 +1603,9 @@ useEffect(() => {
     loadContractMeta(applicantRows);
   }, [applicantRows, loadContractMeta]);
 
-  // ── Bulk selection helpers ─────────────────────────────────────────────────
+  const visibleRows = useMemo(() => applicantRows.slice(0, visibleCount), [applicantRows, visibleCount]);
+  const hasMore = visibleCount < applicantRows.length;
+
   const isBulkSelectable = useCallback(
     (row: InfluencerRow): boolean => {
       const raw = (row as any)?.__raw ?? {};
@@ -1535,21 +1629,14 @@ useEffect(() => {
       if (allSelected) return prev.filter((id) => !eligibleIds.includes(id));
       return Array.from(new Set([...prev, ...eligibleIds]));
     });
-  }, [applicantRows, isBulkSelectable, selectedBulkIds]);
+  }, [visibleRows, isBulkSelectable, selectedBulkIds]);
 
   const clearBulkSelection = useCallback(() => {
     setSelectedBulkIds([]);
   }, []);
 
-  // ── Send-contract requirements / prefill API ───────────────────────────────
   const getRawInfluencerId = useCallback((raw: any, fallbackId = "") => {
-    return String(
-      raw?.influencerId ||
-      raw?._id ||
-      raw?.id ||
-      fallbackId ||
-      ""
-    ).trim();
+    return String(raw?.influencerId || raw?._id || raw?.id || fallbackId || "").trim();
   }, []);
 
   const fetchSendContractRequirements = useCallback(
@@ -1568,12 +1655,7 @@ useEffect(() => {
         throw new Error("Brand and campaign are required before sending a contract.");
       }
 
-      const payload: Record<string, any> = {
-        brandId,
-        campaignId,
-        mode,
-      };
-
+      const payload: Record<string, any> = { brandId, campaignId, mode };
       if (paymentType) payload.paymentType = paymentType;
       if (mode === "bulk") payload.influencerIds = influencerIds || [];
       else payload.influencerId = influencerId;
@@ -1584,7 +1666,6 @@ useEffect(() => {
     [brandId, campaignId]
   );
 
-  // ── Payout type dialog helpers ─────────────────────────────────────────────
   const openBulkPayoutTypeDialog = useCallback(() => {
     setPayoutDialogMode("bulk");
     setPendingInfluencerForContract(null);
@@ -1599,15 +1680,12 @@ useEffect(() => {
 
   const handleSelectPayoutType = useCallback(
     async (type: PaymentType) => {
-      if (typeof window !== "undefined") {
-        localStorage.setItem("campaignPayoutType", type);
-      }
+      if (typeof window !== "undefined") localStorage.setItem("campaignPayoutType", type);
       campaignPayoutTypeRef.current = type;
       setCampaignPayoutType(type);
       setIsPayoutTypeDialogOpen(false);
 
       if (payoutDialogMode === "bulk") {
-        // Gather eligible targets
         const targets = applicantRows
           .filter(isBulkSelectable)
           .filter((row) => selectedBulkIds.includes(row.id))
@@ -1620,12 +1698,7 @@ useEffect(() => {
 
         setOpeningContractForId("bulk");
         try {
-          const prefill = await fetchSendContractRequirements({
-            mode: "bulk",
-            influencerIds: selectedBulkIds,
-            paymentType: type,
-          });
-
+          const prefill = await fetchSendContractRequirements({ mode: "bulk", influencerIds: selectedBulkIds, paymentType: type });
           setBulkTargets(prefill?.influencers?.length ? prefill.influencers : targets);
           setBulkForcedPaymentType(normalizePaymentType(prefill?.paymentType || type));
           setBulkContractPrefill(prefill);
@@ -1643,7 +1716,6 @@ useEffect(() => {
           setOpeningContractForId(null);
         }
 
-        // Fetch names for the header
         try {
           const res: any = await apiGetfetchBulkInfleuncerId(selectedBulkIds);
           const list = res?.influencers || res?.data?.influencers || res?.data || [];
@@ -1655,12 +1727,7 @@ useEffect(() => {
         const influencerId = getRawInfluencerId(pendingInfluencerForContract);
         setOpeningContractForId(influencerId || "single");
         try {
-          const prefill = await fetchSendContractRequirements({
-            influencerId,
-            paymentType: type,
-            mode: "single",
-          });
-
+          const prefill = await fetchSendContractRequirements({ influencerId, paymentType: type, mode: "single" });
           setContractPrefill(prefill);
           setContractForcedPaymentType(normalizePaymentType(prefill?.paymentType || type));
           setContractTarget(prefill?.influencer || pendingInfluencerForContract);
@@ -1681,29 +1748,14 @@ useEffect(() => {
       setPendingInfluencerForContract(null);
       setPayoutDialogMode(null);
     },
-    [
-      payoutDialogMode,
-      pendingInfluencerForContract,
-      applicantRows,
-      isBulkSelectable,
-      selectedBulkIds,
-      contractMetaMap,
-      fetchSendContractRequirements,
-      getRawInfluencerId,
-    ]
+    [payoutDialogMode, pendingInfluencerForContract, applicantRows, isBulkSelectable, selectedBulkIds, contractMetaMap, fetchSendContractRequirements, getRawInfluencerId]
   );
 
-  // ── Decision status handler ────────────────────────────────────────────────
-  // ── Decision status handler ────────────────────────────────────────────────
-  const handleApplicantDecision = async (
-    row: InfluencerRow,
-    action: ApplicantDecisionField
-  ) => {
+  const handleApplicantDecision = async (row: InfluencerRow, action: ApplicantDecisionField) => {
     const source = String((row as any)?.__source ?? "");
     if (source !== "applicant") return;
     if (!campaignId || !row.id) return;
 
-    // Map action field → tab path
     const actionToTab: Partial<Record<ApplicantDecisionField, string>> = {
       isRejected: "rejected",
       isUndicided: "undecided",
@@ -1712,13 +1764,7 @@ useEffect(() => {
 
     try {
       setUpdatingDecisionId(row.id);
-
-      const res = await apiSetApplicantDecisionStatus({
-        campaignId,
-        influencerId: row.id,
-        field: action,
-      });
-
+      const res = await apiSetApplicantDecisionStatus({ campaignId, influencerId: row.id, field: action });
       const updatedApplicant = res?.applicant;
       if (!updatedApplicant) return;
 
@@ -1732,22 +1778,13 @@ useEffect(() => {
             isUndicided: Number(updatedApplicant.isUndicided ?? 0),
             isRejected: Number(updatedApplicant.isRejected ?? 0),
           };
-          const nextRow = {
-            ...r,
-            status: getApplicantDisplayStatus(nextRaw),
-            __raw: nextRaw,
-          } as InfluencerRow;
-
+          const nextRow = { ...r, status: getApplicantDisplayStatus(nextRaw), __raw: nextRaw } as InfluencerRow;
           return doesApplicantBelongToTab(nextRaw, tab) ? [nextRow] : [];
         })
       );
 
-      // ── Navigate to the corresponding tab ──────────────────────────────
       const targetTab = actionToTab[action];
-      if (targetTab) {
-        router.push(`/brand/influ/${targetTab}?campaignId=${campaignId}`);
-      }
-
+      if (targetTab) router.push(`/brand/influ/${targetTab}?campaignId=${campaignId}`);
     } catch (e) {
       alert(getApiErrorMessage(e, "Failed to update applicant status"));
     } finally {
@@ -1755,26 +1792,19 @@ useEffect(() => {
     }
   };
 
-  // ── View contract PDF ──────────────────────────────────────────────────────
   const handleViewContractPdf = useCallback(
     async (row: InfluencerRow) => {
-      console.log("handleViewContractPdf", row)
       const meta = contractMetaMap[row.id] ?? null;
-      const contractDocId = meta?._id ?? null;
+      const contractLookupId = String(meta?.contractId || meta?._id || "").trim();
 
-      if (!contractDocId) {
+      if (!contractLookupId) {
         toast({ icon: "error", title: "No contract", text: "No contract document found." });
         return;
       }
 
       setViewingPdfForId(row.id);
       try {
-        const res = await api.post(
-          "/contract/viewPdf",
-          { contractId: contractDocId }, // or { _id: contractDocId } if backend expects that key
-          { responseType: "blob" }
-        );
-
+        const res = await api.post("/contract/viewPdf", { contractId: contractLookupId }, { responseType: "blob" });
         const url = URL.createObjectURL(res.data);
         window.open(url, "_blank");
         setTimeout(() => URL.revokeObjectURL(url), 10000);
@@ -1791,7 +1821,6 @@ useEffect(() => {
     [contractMetaMap]
   );
 
-  // ── Brand accept handler ───────────────────────────────────────────────────
   const handleBrandAccept = useCallback(
     async (row: InfluencerRow) => {
       const meta = contractMetaMap[row.id] ?? null;
@@ -1813,7 +1842,6 @@ useEffect(() => {
     [contractMetaMap, fetchApplicants]
   );
 
-  // ── Sign modal opener ──────────────────────────────────────────────────────
   const openSignModal = useCallback((meta: ContractMeta | null) => {
     if (!meta?.contractId) {
       toast({ icon: "error", title: "No contract", text: "No contract found." });
@@ -1823,7 +1851,6 @@ useEffect(() => {
     setSignOpen(true);
   }, []);
 
-  // ── Contract sidebar opener ────────────────────────────────────────────────
   const openContractSidebar = useCallback(
     async (row: InfluencerRow) => {
       const raw = (row as any)?.__raw ?? null;
@@ -1864,46 +1891,160 @@ useEffect(() => {
     [contractMetaMap, fetchSendContractRequirements, getRawInfluencerId]
   );
 
+  const handleUseTemplateContract = useCallback(
+    (row: InfluencerRow) => {
+      const raw = (row as any)?.__raw ?? null;
+      if (!raw) return;
+
+      const meta = contractMetaMap[row.id] ?? null;
+      const isNewContract = !hasExistingContract(raw, meta);
+
+      if (isNewContract) {
+        openSinglePayoutTypeDialog(raw);
+        return;
+      }
+
+      openContractSidebar(row);
+    },
+    [contractMetaMap, openSinglePayoutTypeDialog, openContractSidebar]
+  );
+
+  const openOwnContractPicker = useCallback(
+    (row: InfluencerRow) => {
+      if (!brandId || !campaignId) {
+        toast({ icon: "error", title: "Missing details", text: "Brand or campaign id is missing." });
+        return;
+      }
+      setOwnContractTargetRow(row);
+      requestAnimationFrame(() => ownContractInputRef.current?.click());
+    },
+    [brandId, campaignId]
+  );
+
+  const handleOwnContractFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] || null;
+      e.target.value = "";
+
+      const row = ownContractTargetRow;
+      setOwnContractTargetRow(null);
+      if (!file || !row) return;
+
+      const raw = (row as any)?.__raw ?? {};
+      const influencerId = getRawInfluencerId(raw, row.id);
+
+      if (!brandId || !campaignId || !influencerId) {
+        toast({ icon: "error", title: "Missing details", text: "Brand, campaign, or influencer id is missing." });
+        return;
+      }
+
+      const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      if (!isPdf) {
+        toast({ icon: "error", title: "Invalid file", text: "Please upload a PDF contract." });
+        return;
+      }
+
+      if (file.size > 15 * 1024 * 1024) {
+        toast({ icon: "error", title: "File too large", text: "Contract PDF must be 15 MB or less." });
+        return;
+      }
+
+      const meta = contractMetaMap[row.id] ?? null;
+      const isResend = Boolean(meta?.contractId && isRejectedMeta(meta));
+      const ok = await askConfirm(
+        isResend ? "Resend uploaded contract?" : "Upload own contract?",
+        `This will upload "${file.name}" to S3 and send it to the influencer.`
+      );
+      if (!ok) return;
+
+      try {
+        setUploadingContractForId(row.id);
+        const uploadUrlRes: any = await api.post("/contract/own/upload-url", {
+          brandId,
+          campaignId,
+          influencerId,
+          fileName: file.name,
+          contentType: "application/pdf",
+          sizeBytes: file.size,
+        });
+
+        const upload = uploadUrlRes?.data?.upload || uploadUrlRes?.upload;
+        if (!upload?.uploadUrl || !upload?.key) throw new Error("Upload URL was not returned.");
+
+        const s3Res = await fetch(upload.uploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": "application/pdf" },
+          body: file,
+        });
+        if (!s3Res.ok) throw new Error("S3 upload failed.");
+
+        const sendRes: any = await api.post("/contract/own/send-uploaded", {
+          brandId,
+          campaignId,
+          influencerId,
+          isResend,
+          resendOf: isResend ? meta?.contractId : "",
+          uploadedContract: {
+            key: upload.key,
+            bucket: upload.bucket,
+            folder: upload.folder,
+            originalName: upload.originalName || file.name,
+            mimeType: "application/pdf",
+            sizeBytes: file.size,
+          },
+        });
+
+        const payload = sendRes?.data || sendRes || {};
+        const uploadedContract = payload.contract || null;
+
+        if (uploadedContract?.contractId) {
+          setContractMetaMap((prev) => ({ ...prev, [row.id]: uploadedContract }));
+        }
+
+        toast({
+          icon: "success",
+          title: isResend ? "Contract resent" : "Contract uploaded",
+          text: "Own contract has been sent to the influencer.",
+        });
+
+        await fetchApplicants();
+      } catch (err: any) {
+        toast({
+          icon: "error",
+          title: "Upload failed",
+          text: err?.response?.data?.message || err?.message || "Could not upload own contract.",
+        });
+      } finally {
+        setUploadingContractForId(null);
+      }
+    },
+    [ownContractTargetRow, brandId, campaignId, contractMetaMap, fetchApplicants, getRawInfluencerId]
+  );
+
   const handleManage = useCallback(
     async (row: InfluencerRow) => {
       const raw = (row as any)?.__raw ?? {};
-
-      const influencerId = String(
-        raw?.influencerId ||
-        row.id ||
-        ""
-      ).trim();
-
+      const influencerId = String(raw?.influencerId || row.id || "").trim();
       if (!influencerId) {
-        toast({
-          icon: "error",
-          title: "Influencer not found",
-          text: "Could not identify this influencer.",
-        });
+        toast({ icon: "error", title: "Influencer not found", text: "Could not identify this influencer." });
         return;
       }
 
       let contractId = String(
         contractMetaMap[row.id]?.contractId ||
-        contractMetaMap[row.id]?._id ||
-        raw?.contractId ||
-        raw?.contract?._id ||
-        raw?.contract?.contractId ||
-        ""
+          contractMetaMap[row.id]?._id ||
+          raw?.contractId ||
+          raw?.contract?._id ||
+          raw?.contract?.contractId ||
+          ""
       ).trim();
 
-      // Fallback: if contract meta has not loaded yet, fetch latest contract before redirect.
       if (!contractId && raw?.influencerId && brandId && campaignId) {
         try {
           const meta = await getLatestContractForApplicant(raw);
-
           if (meta) {
             contractId = String(meta?.contractId || meta?._id || "").trim();
-
-            setContractMetaMap((prev) => ({
-              ...prev,
-              [row.id]: meta,
-            }));
+            setContractMetaMap((prev) => ({ ...prev, [row.id]: meta }));
           }
         } catch (e) {
           console.error("Failed to fetch contract before manage redirect", e);
@@ -1911,33 +2052,18 @@ useEffect(() => {
       }
 
       const params = new URLSearchParams();
-
       params.set("influencerId", influencerId);
-
-      if (campaignId) {
-        params.set("campaignId", campaignId);
-      }
-
-      if (contractId) {
-        params.set("contractId", contractId);
-      }
+      if (campaignId) params.set("campaignId", campaignId);
+      if (contractId) params.set("contractId", contractId);
 
       const targetUrl = `/brand/influencers?${params.toString()}`;
-
       if (typeof window !== "undefined") {
         window.location.href = targetUrl;
         return;
       }
-
       router.push(targetUrl);
     },
-    [
-      router,
-      campaignId,
-      brandId,
-      contractMetaMap,
-      getLatestContractForApplicant,
-    ]
+    [router, campaignId, brandId, contractMetaMap, getLatestContractForApplicant]
   );
 
   const handleMail = useCallback(
@@ -1947,20 +2073,11 @@ useEffect(() => {
       const influencerName = raw?.name || row.profile?.name || "Influencer";
 
       if (!brandId) {
-        toast({
-          icon: "error",
-          title: "Brand not found",
-          text: "Please sign in again.",
-        });
+        toast({ icon: "error", title: "Brand not found", text: "Please sign in again." });
         return;
       }
-
       if (!influencerId) {
-        toast({
-          icon: "error",
-          title: "Influencer not found",
-          text: "Could not identify the influencer for this thread.",
-        });
+        toast({ icon: "error", title: "Influencer not found", text: "Could not identify the influencer for this thread." });
         return;
       }
 
@@ -1972,34 +2089,20 @@ useEffect(() => {
           subject: campaignTitle || `Conversation with ${influencerName}`,
         });
 
-        const threadId =
-          threadRes?.threadId ||
-          null;
-
-        if (!threadId) {
-          throw new Error("Thread ID not returned from server.");
-        }
-
-        router.push(
-          `/brand/inbox/${threadId}${campaignId ? `?campaignId=${encodeURIComponent(campaignId)}` : ""
-          }`
-        );
+        const threadId = threadRes?.threadId || null;
+        if (!threadId) throw new Error("Thread ID not returned from server.");
+        router.push(`/brand/inbox/${threadId}${campaignId ? `?campaignId=${encodeURIComponent(campaignId)}` : ""}`);
       } catch (e: any) {
         toast({
           icon: "error",
           title: "Inbox open failed",
-          text:
-            e?.response?.data?.error ||
-            e?.response?.data?.message ||
-            e?.message ||
-            "Could not create/open the inbox thread.",
+          text: e?.response?.data?.error || e?.response?.data?.message || e?.message || "Could not create/open the inbox thread.",
         });
       }
     },
     [brandId, router, campaignId, campaignTitle]
   );
 
-  // ── Milestone handlers ─────────────────────────────────────────────────────
   const handleOpenMilestoneModal = useCallback((row: InfluencerRow) => {
     setMilestoneTargetRow(row);
   }, []);
@@ -2018,11 +2121,7 @@ useEffect(() => {
   const handleViewMilestone = useCallback(
     (row: InfluencerRow) => {
       if (!campaignId) {
-        toast({
-          icon: "error",
-          title: "Campaign missing",
-          text: "Campaign id not found in URL.",
-        });
+        toast({ icon: "error", title: "Campaign missing", text: "Campaign id not found in URL." });
         return;
       }
 
@@ -2031,34 +2130,19 @@ useEffect(() => {
 
       if (isAdminCreatedCampaign) {
         router.push(
-          `/brand/milestone-history?campaignId=${encodeURIComponent(
-            campaignId
-          )}&influencerId=${encodeURIComponent(
-            influencerId
-          )}&brandId=${encodeURIComponent(brandId || "")}`
+          `/brand/milestone-history?campaignId=${encodeURIComponent(campaignId)}&influencerId=${encodeURIComponent(influencerId)}&brandId=${encodeURIComponent(brandId || "")}`
         );
         return;
       }
 
       const meta = contractMetaMap[row.id] ?? null;
-
       if (!meta?.contractId) {
-        toast({
-          icon: "error",
-          title: "Contract missing",
-          text: "No contract found for this influencer.",
-        });
+        toast({ icon: "error", title: "Contract missing", text: "No contract found for this influencer." });
         return;
       }
 
       router.push(
-        `/brand/influ/view-milestone?contractId=${encodeURIComponent(
-          meta.contractId
-        )}&campaignId=${encodeURIComponent(
-          campaignId
-        )}&influencerId=${encodeURIComponent(
-          influencerId
-        )}&brandId=${encodeURIComponent(brandId || "")}`
+        `/brand/influ/view-milestone?contractId=${encodeURIComponent(meta.contractId)}&campaignId=${encodeURIComponent(campaignId)}&influencerId=${encodeURIComponent(influencerId)}&brandId=${encodeURIComponent(brandId || "")}`
       );
     },
     [campaignId, brandId, contractMetaMap, router, isAdminCreatedCampaign]
@@ -2066,27 +2150,14 @@ useEffect(() => {
 
   const getRowInfluencerId = useCallback((row: InfluencerRow) => {
     const raw = (row as any)?.__raw ?? {};
-
-    return String(
-      raw?.influencerId ||
-      raw?.influencer?._id ||
-      raw?.influencer?.id ||
-      row.id ||
-      ""
-    ).trim();
+    return String(raw?.influencerId || raw?.influencer?._id || raw?.influencer?.id || row.id || "").trim();
   }, []);
 
   const buildCampaignFeedbackPayload = useCallback(
     (row: InfluencerRow): CampaignFeedbackPayload | null => {
       const influencerId = getRowInfluencerId(row);
-
       if (!campaignId || !brandId || !influencerId) return null;
-
-      return {
-        campaignId,
-        brandId,
-        influencerId,
-      };
+      return { campaignId, brandId, influencerId };
     },
     [campaignId, brandId, getRowInfluencerId]
   );
@@ -2099,14 +2170,11 @@ useEffect(() => {
   const checkCampaignFeedbackState = useCallback(
     async (row: InfluencerRow) => {
       const payload = buildCampaignFeedbackPayload(row);
-
       if (!payload) return false;
-
       try {
         const res = await post<any>("/campaign-reviews/brand/prompt-state", payload);
         const result = res?.data ?? res;
         const state = (result?.data ?? result ?? {}) as CampaignFeedbackPromptState;
-
         return shouldShowCampaignFeedbackButton(state);
       } catch {
         return false;
@@ -2117,35 +2185,21 @@ useEffect(() => {
 
   const openCampaignFeedbackModal = useCallback(
     async (row: InfluencerRow) => {
-      const shouldPrompt =
-        campaignFeedbackPromptMap[row.id] ??
-        (await checkCampaignFeedbackState(row));
-
+      const shouldPrompt = campaignFeedbackPromptMap[row.id] ?? (await checkCampaignFeedbackState(row));
       if (!shouldPrompt) {
-        toast({
-          icon: "info",
-          title: "Feedback not available yet",
-          text: "Send Feedback will appear after the first feedback prompt is closed or skipped.",
-        });
+        toast({ icon: "info", title: "Feedback not available yet", text: "Send Feedback will appear after the first feedback prompt is closed or skipped." });
         setCampaignFeedbackPromptMap((prev) => ({ ...prev, [row.id]: false }));
         return;
       }
-
       setCampaignFeedbackTarget(row);
     },
     [campaignFeedbackPromptMap, checkCampaignFeedbackState]
   );
 
-  // ── Visible rows ───────────────────────────────────────────────────────────
-  const visibleRows = useMemo(() => applicantRows.slice(0, visibleCount), [applicantRows, visibleCount]);
-  const hasMore = visibleCount < applicantRows.length;
-
   useEffect(() => {
     if (!campaignId || !brandId || visibleRows.length === 0) return;
-
     let cancelled = false;
     const rowsToCheck = visibleRows.filter(isCampaignFeedbackActiveRow);
-
     if (rowsToCheck.length === 0) return;
 
     async function run() {
@@ -2155,28 +2209,13 @@ useEffect(() => {
           return [row.id, shouldPrompt] as const;
         })
       );
-
       if (cancelled) return;
-
-      setCampaignFeedbackPromptMap((prev) => ({
-        ...prev,
-        ...Object.fromEntries(results),
-      }));
+      setCampaignFeedbackPromptMap((prev) => ({ ...prev, ...Object.fromEntries(results) }));
     }
 
     void run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    campaignId,
-    brandId,
-    visibleRows,
-    isCampaignFeedbackActiveRow,
-    checkCampaignFeedbackState,
-    campaignFeedbackRefreshKey,
-  ]);
+    return () => { cancelled = true; };
+  }, [campaignId, brandId, visibleRows, isCampaignFeedbackActiveRow, checkCampaignFeedbackState, campaignFeedbackRefreshKey]);
 
   const loadMore = async () => {
     if (!hasMore || loadingMore) return;
@@ -2191,26 +2230,20 @@ useEffect(() => {
   const loading = loadingApplicants;
   const err = errApplicants;
   const showLoadMore = !loading && !err && visibleRows.length > 0 && hasMore;
-  // ── All-tab contract-aware renderer ───────────────────────────────────────────
+
   const renderAllTabActions = useCallback(
     (row: InfluencerRow) => {
       const raw = (row as any)?.__raw ?? {};
       const meta = contractMetaMap[row.id] ?? null;
 
-      // ── No contract → render null so DefaultTable falls back to X/? /✓ ActionGroup
-      // AFTER
       const isShortlisted = Number(raw?.isShortlisted) === 1;
       const isUndicided = Number(raw?.isUndicided) === 1;
       const isRejected = Number(raw?.isRejected) === 1;
       const isActive = Number(raw?.isAccepted) === 1;
       const hasDecision = isShortlisted || isUndicided || isRejected || isActive;
 
-      // Pure "Applied" with no contract → fall back to X / ? / ✓
-      // AFTER
-      // Pure "Applied" → fall back to default X / ? / ✓
       if (!hasExistingContract(raw, meta) && !hasDecision) return null;
 
-      // Undecided with no contract → ? disabled
       if (!hasExistingContract(raw, meta) && isUndicided) {
         return (
           <ActionGroup
@@ -2222,7 +2255,6 @@ useEffect(() => {
         );
       }
 
-      // Rejected with no contract → X disabled
       if (!hasExistingContract(raw, meta) && isRejected) {
         return (
           <ActionGroup
@@ -2241,8 +2273,6 @@ useEffect(() => {
       const isLoading = viewingPdfForId === row.id || openingContractForId === row.id;
       const { label: primaryLabel, viewOnly } = getPrimaryAction(raw, meta);
 
-
-      // Active influencers → milestone-style actions
       if (isActive) {
         return (
           <ActiveMilestoneActions
@@ -2276,13 +2306,19 @@ useEffect(() => {
         );
       }
 
-      // Has contract but not active → Send Contract / View Contract + Manage
       return (
         <ActionButtons
-          primaryLabel={isLoading && viewOnly ? "Opening…" : primaryLabel}
-          onPrimary={() =>
-            viewOnly ? handleViewContractPdf(row) : openContractSidebar(row)
+          primaryLabel={
+            uploadingContractForId === row.id
+              ? "Uploading…"
+              : isLoading && viewOnly
+                ? "Opening…"
+                : primaryLabel
           }
+          contractChoiceMode={!viewOnly && (primaryLabel === "Send Contract" || primaryLabel === "Resend Contract")}
+          onUseTemplate={() => handleUseTemplateContract(row)}
+          onUploadOwnContract={() => openOwnContractPicker(row)}
+          onPrimary={() => (viewOnly ? handleViewContractPdf(row) : openContractSidebar(row))}
           onManage={() => handleManage(row)}
           onMail={() => handleMail(row)}
           moreMenu={
@@ -2302,6 +2338,7 @@ useEffect(() => {
           onSign={() => openSignModal(meta)}
           showViewContract={!viewOnly && hasExistingContract(raw, meta)}
           onViewContract={() => handleViewContractPdf(row)}
+          isViewContractLoading={viewingPdfForId === row.id}
         />
       );
     },
@@ -2309,6 +2346,8 @@ useEffect(() => {
       contractMetaMap,
       milestoneCreatedMap,
       viewingPdfForId,
+      uploadingContractForId,
+      openingContractForId,
       handleOpenMilestoneModal,
       handleApplicantDecision,
       handleViewMilestone,
@@ -2316,24 +2355,34 @@ useEffect(() => {
       handleMail,
       handleViewContractPdf,
       openContractSidebar,
+      handleUseTemplateContract,
+      openOwnContractPicker,
       handleBrandAccept,
       openSignModal,
       campaignFeedbackPromptMap,
       openCampaignFeedbackModal,
     ]
   );
-  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <>
-<InfluencerFilter
-  filters={filters}
-  setFilters={setFilters}
-  search={search}
-  setSearch={setSearch}
-  sortValue={sortValue}
-  setSortValue={setSortValue}
-  hideAdvancedFilters={isFullyManagedMode}
-/>
+      <input
+        ref={ownContractInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+        onChange={handleOwnContractFileChange}
+      />
+
+      <InfluencerFilter
+        filters={filters}
+        setFilters={setFilters}
+        search={search}
+        setSearch={setSearch}
+        sortValue={sortValue}
+        setSortValue={setSortValue}
+        hideAdvancedFilters={isFullyManagedMode}
+      />
 
       <div className="mt-[3.5rem] px-3 pb-[2.5rem] md:px-[2rem]">
         <div className="overflow-visible rounded-[0.75rem] bg-white">
@@ -2348,33 +2397,27 @@ useEffect(() => {
                   rows={visibleRows}
                   variant={tableVariant}
                   onActionClick={handleApplicantDecision}
-                  // ── Bulk selection props ────────────────────────────────────
                   selectable
                   selectedIds={selectedBulkIds}
                   onToggleRow={toggleBulkRow}
                   onToggleAll={toggleBulkAllVisible}
                   onClearSelection={clearBulkSelection}
                   isRowSelectable={(row) => isBulkSelectable(row as InfluencerRow)}
-                  // ── Bulk header banner ──────────────────────────────────────
                   renderBulkHeader={({ selectedIds, clearSelection }) => (
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-[#F2F2F2] px-8 py-3">
                       <div className="text-sm font-medium text-gray-800">
                         {selectedIds.length} influencer{selectedIds.length > 1 ? "s" : ""} selected
                       </div>
                       <div className="flex items-center gap-2">
-                        <Button variant="outline" onClick={clearSelection}>
-                          Clear
-                        </Button>
+                        <Button variant="outline" onClick={clearSelection}>Clear</Button>
                         <Button onClick={openBulkPayoutTypeDialog}>
                           <PaperPlaneTilt className="mr-2 h-4 w-4" />
                           Bulk Send Contract
                         </Button>
                       </div>
                     </div>
-
                   )}
                   renderDefaultActions={renderAllTabActions}
-                  // ── Per-row action renderers ────────────────────────────────
                   renderShortlistedActions={(row) => {
                     const meta = contractMetaMap[row.id] ?? null;
                     const raw = (row as any)?.__raw ?? {};
@@ -2386,10 +2429,17 @@ useEffect(() => {
 
                     return (
                       <ActionButtons
-                        primaryLabel={isLoading ? "Opening…" : primaryLabel}
-                        onPrimary={() =>
-                          viewOnly ? handleViewContractPdf(row) : openContractSidebar(row)
+                        primaryLabel={
+                          uploadingContractForId === row.id
+                            ? "Uploading…"
+                            : isLoading && viewOnly
+                              ? "Opening…"
+                              : primaryLabel
                         }
+                        contractChoiceMode={!viewOnly && (primaryLabel === "Send Contract" || primaryLabel === "Resend Contract")}
+                        onUseTemplate={() => handleUseTemplateContract(row)}
+                        onUploadOwnContract={() => openOwnContractPicker(row)}
+                        onPrimary={() => (viewOnly ? handleViewContractPdf(row) : openContractSidebar(row))}
                         onManage={() => handleManage(row)}
                         onMail={() => handleMail(row)}
                         moreMenu={
@@ -2409,6 +2459,7 @@ useEffect(() => {
                         onSign={() => openSignModal(meta)}
                         showViewContract={!viewOnly && hasExistingContract(raw, meta)}
                         onViewContract={() => handleViewContractPdf(row)}
+                        isViewContractLoading={viewingPdfForId === row.id}
                       />
                     );
                   }}
@@ -2417,8 +2468,7 @@ useEffect(() => {
                     const statusStr = String(meta?.status || "");
                     const showAccept = needsBrandAcceptance(statusStr);
                     const showSign = canSignNow(meta);
-                    const showViewMilestone =
-                      isAdminCreatedCampaign || milestoneCreatedMap[row.id] || hasMilestonesCreated(meta);
+                    const showViewMilestone = isAdminCreatedCampaign || milestoneCreatedMap[row.id] || hasMilestonesCreated(meta);
 
                     return (
                       <ActiveMilestoneActions
@@ -2438,9 +2488,7 @@ useEffect(() => {
                             onAddMilestone={() => handleOpenMilestoneModal(row)}
                             onAssignDeliverables={() => console.log("assign deliverables", row.id)}
                             onSaveToHub={(hubId) => console.log("save to hub", row.id, hubId)}
-                            onMoveToWorkspace={(workspaceId) =>
-                              console.log("move to workspace", row.id, workspaceId)
-                            }
+                            onMoveToWorkspace={(workspaceId) => console.log("move to workspace", row.id, workspaceId)}
                             onRaiseDispute={() => console.log("raise dispute", row.id)}
                             onDelete={() => console.log("remove", row.id)}
                           />
@@ -2455,7 +2503,6 @@ useEffect(() => {
                   renderStatus={(row) => {
                     const raw = (row as any)?.__raw ?? {};
                     const meta = contractMetaMap[row.id] ?? null;
-
                     return (
                       <div className="flex min-h-[1.75rem] items-center justify-center rounded-[1.25rem] px-3 bg-[#F9F9F9]">
                         <span className="whitespace-nowrap text-[0.875rem] font-semibold text-[#1A1A1A]">
@@ -2469,9 +2516,7 @@ useEffect(() => {
             </div>
           )}
 
-          {updatingDecisionId && (
-            <div className="px-6 pb-2 text-xs text-gray-500">Updating applicant status...</div>
-          )}
+          {updatingDecisionId && <div className="px-6 pb-2 text-xs text-gray-500">Updating applicant status...</div>}
 
           {!loading && !err && loadingContractMeta && visibleRows.length > 0 ? (
             <div className="px-6 pb-2 text-xs text-gray-500">Checking contract status...</div>
@@ -2485,20 +2530,14 @@ useEffect(() => {
                 disabled={loadingMore}
                 className="flex h-[2.0625rem] items-center justify-center gap-[0.5rem] rounded-[0.75rem] bg-[#1A1A1A] px-[0.75rem] text-[#F9F9F9] text-[0.75rem] font-semibold leading-[1.25rem] hover:bg-[#111111] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <CircleNotch
-                  weight="bold"
-                  className={`h-[0.875rem] w-[0.875rem] text-white ${loadingMore ? "animate-spin" : ""}`}
-                />
-                <span className="flex items-center justify-center px-[0.25rem]">
-                  {loadingMore ? "Loading..." : "Load More"}
-                </span>
+                <CircleNotch weight="bold" className={`h-[0.875rem] w-[0.875rem] text-white ${loadingMore ? "animate-spin" : ""}`} />
+                <span className="flex items-center justify-center px-[0.25rem]">{loadingMore ? "Loading..." : "Load More"}</span>
               </Button>
             </div>
           )}
         </div>
       </div>
 
-      {/* ── Single influencer contract sidebar ─────────────────────────────── */}
       <ContractSidebarExtracted
         open={contractOpen}
         onClose={() => {
@@ -2522,7 +2561,6 @@ useEffect(() => {
         }}
       />
 
-      {/* ── Bulk contract sidebar (uses same component with bulk props) ──────── */}
       <ContractSidebarExtracted
         open={bulkSidebarOpen}
         onClose={() => {
@@ -2546,8 +2584,6 @@ useEffect(() => {
         forcedPaymentType={bulkForcedPaymentType}
         mode="bulk"
         bulkInfluencers={bulkTargets}
-        // bulkInfluencerIds={selectedBulkIds}
-        // bulkInfluencerNames={bulkInfluencerNames}
         onSuccess={async () => {
           await fetchApplicants();
           setSelectedBulkIds([]);
@@ -2556,7 +2592,6 @@ useEffect(() => {
         }}
       />
 
-      {/* ── Add Milestone modal ───────────────────────────────────────────────── */}
       <AddMilestoneCard
         open={Boolean(milestoneTargetRow)}
         onClose={handleCloseMilestoneModal}
@@ -2578,24 +2613,14 @@ useEffect(() => {
         campaignName={campaignTitle || "the campaign"}
         onSubmitted={() => {
           if (campaignFeedbackTarget?.id) {
-            setCampaignFeedbackPromptMap((prev) => ({
-              ...prev,
-              [campaignFeedbackTarget.id]: false,
-            }));
+            setCampaignFeedbackPromptMap((prev) => ({ ...prev, [campaignFeedbackTarget.id]: false }));
           }
-
           setCampaignFeedbackTarget(null);
           setCampaignFeedbackRefreshKey((value) => value + 1);
-
-          toast({
-            icon: "success",
-            title: "Feedback submitted",
-            text: "Campaign feedback has been submitted successfully.",
-          });
+          toast({ icon: "success", title: "Feedback submitted", text: "Campaign feedback has been submitted successfully." });
         }}
       />
 
-      {/* ── Signature modal ───────────────────────────────────────────────────── */}
       <SignatureModal
         isOpen={signOpen}
         onClose={() => { setSignOpen(false); setSignTargetMeta(null); }}
@@ -2619,14 +2644,12 @@ useEffect(() => {
         }}
       />
 
-      {/* ── Payout type selection dialog ──────────────────────────────────────── */}
       <Dialog open={isPayoutTypeDialogOpen} onOpenChange={setIsPayoutTypeDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Select campaign payout type</DialogTitle>
             <DialogDescription>
-              Choose how this campaign will be structured for the selected influencer
-              {payoutDialogMode === "bulk" ? "s" : ""}.
+              Choose how this campaign will be structured for the selected influencer{payoutDialogMode === "bulk" ? "s" : ""}.
             </DialogDescription>
           </DialogHeader>
 
@@ -2637,9 +2660,7 @@ useEffect(() => {
               className="rounded-xl border border-gray-200 p-4 text-left transition hover:bg-gray-50"
             >
               <div className="text-sm font-semibold text-gray-900">Fixed</div>
-              <div className="mt-1 text-sm text-gray-500">
-                One fixed payout amount for the entire campaign.
-              </div>
+              <div className="mt-1 text-sm text-gray-500">One fixed payout amount for the entire campaign.</div>
             </button>
 
             <button
@@ -2648,9 +2669,7 @@ useEffect(() => {
               className="rounded-xl border border-gray-200 p-4 text-left transition hover:bg-gray-50"
             >
               <div className="text-sm font-semibold text-gray-900">Milestone</div>
-              <div className="mt-1 text-sm text-gray-500">
-                Payment is released in stages based on deliverables.
-              </div>
+              <div className="mt-1 text-sm text-gray-500">Payment is released in stages based on deliverables.</div>
             </button>
           </div>
         </DialogContent>

@@ -405,7 +405,6 @@ export async function apiGetAllCategories() {
 /** -------------------------
  *  ✅ CAMPAIGN APIs
  *  ------------------------*/
-export type Platform = "youtube" | "instagram" | "tiktok";
 export type CampaignStatus = "draft" | "scheduled" | "active" | "paused" | "completed" | "archived";
 
 /** Your controller returns enriched docs; keep it flexible */
@@ -441,7 +440,6 @@ export type CampaignRowSummary = {
   startIn: TimeMeta;
   expireIn: TimeMeta;
 
-  platformSelection: Platform[];
   productImages: any[];
 
   byAi: 0 | 1;
@@ -468,8 +466,6 @@ export type CreateCampaignManualPayload = {
   contentFormats?: string[] | string;
   contentLanguageIds?: string[] | string;
 
-  platformSelection?: Platform[] | string[];
-
   targetCountryIds?: string[] | string;
   targetAgeRanges?: string[] | string;
   preferredHashtags?: string[] | string;
@@ -487,7 +483,9 @@ export type CreateCampaignManualPayload = {
   scheduledAt?: string;
   startAt?: string;
   endAt?: string;
-
+  campaignTimezone?: string;
+  timezone?: string;
+  tz?: string;
   status?: CampaignStatus;
 };
 
@@ -500,39 +498,64 @@ export async function apiCampaignCreate(payload: CreateCampaignManualPayload) {
 export type PrefillCampaignAIPayload = {
   brandId: string;
 
-  campaignTitle: string;
   description: string;
-  campaignType: string;
+  campaignPrompt?: string;
 
-  categoryId: string;
-  subcategoryIds: string[] | string;
-
-  productImages: any[];
   productLink?: string;
-
-  targetCountryIds: string[] | string;
-  targetAgeRanges: string[] | string;
-
-  additionalNotes?: string;
+  productImages?: Array<
+    | string
+    | {
+      dataUrl?: string;
+      url?: string;
+      imageUrl?: string;
+      s3Url?: string;
+      location?: string;
+      Location?: string;
+      secure_url?: string;
+      src?: string;
+      path?: string;
+      name?: string;
+      type?: string;
+      contentType?: string;
+      originalSize?: number;
+      size?: number;
+      key?: string;
+    }
+  >;
 
   saveDraft?: boolean;
-  save?: boolean;
+  campaignTimezone?: string;
+  timezone?: string;
+  tz?: string;
 };
 
 export async function apiCampaignPrefillAI(payload: PrefillCampaignAIPayload) {
   const finalPayload = {
     ...payload,
-    saveDraft: payload.saveDraft ?? payload.save ?? false,
+    saveDraft: payload.saveDraft ?? false,
   };
 
   const res = await apiPost<any>(`${CAMPAIGN_BASE}/create-ai`, finalPayload);
 
-  const prefill = unwrapPrefillDoc<any>(res);
-  const prefillDetails = res?.prefillDetails ?? null;
-  const savedDraft = res?.savedDraft ?? null;
+  const x = unwrap<any>(res);
+
+  const prefill = x?.prefill ?? x?.data?.prefill ?? x;
+  const prefillDetails =
+    x?.prefillDetails ??
+    x?.data?.prefillDetails ??
+    x?.details ??
+    prefill?.details ??
+    null;
+
+  const savedDraft = x?.savedDraft ?? x?.data?.savedDraft ?? null;
 
   return {
     ...prefill,
+
+    // keep these because CreateByAIScreen currently reads res.prefill / res.prefillDetails
+    prefill,
+    prefillDetails,
+
     categoryName: prefill?.categoryName ?? prefillDetails?.category?.name ?? "",
     details: prefillDetails,
     savedDraft,
@@ -629,8 +652,6 @@ export type EditDraftPayload = {
   contentFormats?: string[] | string;
   contentLanguageIds?: string[] | string;
 
-  platformSelection?: Platform[] | string[];
-
   targetCountryIds?: string[] | string;
   targetAgeRanges?: string[] | string;
   preferredHashtags?: string[] | string;
@@ -641,10 +662,12 @@ export type EditDraftPayload = {
   paymentType?: string;
 
   additionalNotes?: string;
-
   scheduledAt?: string;
   startAt?: string;
   endAt?: string;
+  campaignTimezone?: string;
+  timezone?: string;
+  tz?: string;
 
   status?: CampaignStatus;
 };
@@ -674,8 +697,6 @@ export type EditActivePayload = {
 
   startAt?: string;
   endAt?: string;
-
-  platformSelection?: Platform[] | string[];
 
   targetCountryIds?: string[] | string;
   targetAgeRanges?: string[] | string;
@@ -1007,7 +1028,6 @@ export type CreateMilestoneDeliverablePayload = {
   deliverableName: string;
   deliveries: string[];
   aspectRatio?: string;
-  platforms: string[];
   quantity: number;
 };
 
@@ -1094,7 +1114,6 @@ export type CreateMilestoneResponse = {
       deliverableName: string;
       deliveries: string[];
       aspectRatio?: string;
-      platforms: string[];
       quantity: number;
       deliverableLinks?: MilestoneDeliverableLink[];
       submittedAt?: string | null;
@@ -1378,7 +1397,6 @@ export type MilestoneDeliverableRow = {
 
   deliveries: string[];
   aspectRatio?: string;
-  platforms: string[];
   quantity: number;
 
   deliverableLinks: MilestoneDeliverableLink[];
@@ -1525,7 +1543,6 @@ export type CreateCampaignInvitationPayload = {
   brandId: string;
   influencerId: string;
   campaignIds: string[];
-  platform?: "youtube" | "instagram" | "tiktok";
   handle?: string;
   modashUserId?: string;
   emailTo?: string;
@@ -1540,7 +1557,6 @@ export type CampaignInvitationRow = {
   sentAt?: string;
   failedAt?: string | null;
   failReason?: string | null;
-  platform?: string;
   handle?: string;
   modashUserId?: string;
   emailTo?: string | null;
@@ -1695,8 +1711,6 @@ export async function apiCampaignHistory(payload: CampaignHistoryPayload) {
 
 /** -------- Applicant List By Campaign (NEW) -------- */
 
-/** -------- Applicant List By Campaign (UPDATED) -------- */
-
 export type ApplyListSortField =
   | "name"
   | "primaryPlatform"
@@ -1725,7 +1739,6 @@ export type GetListByCampaignPayload = {
 export type CampaignApplicantInfluencerRow = {
   influencerId: string;
   name: string;
-  primaryPlatform: string | null;
   handle: string | null;
   category: string | null;
   audienceSize: number;
@@ -1833,7 +1846,6 @@ export type CampaignInvitationByCampaignRow = {
   campaignId: string | null;
   campaignTitle?: string | null;
 
-  platform: string | null;
   handle: string | null;
   status: string | null;
 
@@ -1848,7 +1860,6 @@ export type GetCampaignInvitationsByCampaignPayload = {
   campaignId?: string;
 
   brandId: string;
-  platform?: "youtube" | "instagram" | "tiktok" | string;
   status?: string;
   handle?: string;
 
@@ -1899,7 +1910,6 @@ export async function apiGetCampaignInvitationsByCampaign(
       campaignId,
       brandId,
 
-      platform: payload.platform,
       status: payload.status,
       handle: payload.handle,
 
@@ -1919,7 +1929,6 @@ export type GetCampaignInvitationsByBrandAndCampaignPayload = {
   campaignId: string;
   status?: string;
   influencerId?: string;
-  platform?: "youtube" | "instagram" | "tiktok";
   handle?: string;
 };
 
@@ -1941,7 +1950,6 @@ export async function apiGetCampaignInvitationsByBrandAndCampaign(
       campaignId: payload.campaignId,
       status: payload.status,
       influencerId: payload.influencerId,
-      platform: payload.platform,
       handle: payload.handle,
     }
   );
@@ -2085,7 +2093,6 @@ export type UpdateBrandProfilePayload = {
   brandName?: string;
   companySize?: string;
   brandType?: string;
-  platform?: "Instagram" | "Youtube" | "Tiktok";
   profilePic?: string;
 };
 
@@ -2107,7 +2114,6 @@ export type AcceptedAdminCreatedInfluencerRow = {
   influencerEmail: string | null;
   modashUserId: string | null;
   handle: string | null;
-  platform: string | null;
   status: string;
   brandId: string | null;
   brandName: string | null;
@@ -2261,8 +2267,6 @@ export type PublicCampaignDoc = {
   campaignBudget?: number;
   budget?: number;
   paymentType?: string;
-
-  platformSelection?: string[];
 
   targetCountryIds?: string[];
   targetAgeRanges?: string[];
@@ -2948,7 +2952,6 @@ export type InfluencerMatchScoreResponse = {
   matched?: {
     category?: string[];
     subcategory?: string[];
-    platform?: string[];
   };
   source?: {
     campaign?: {
@@ -2958,7 +2961,6 @@ export type InfluencerMatchScoreResponse = {
       subcategoryIds?: string[];
       categoryNames?: string[];
       subcategoryNames?: string[];
-      platforms?: string[];
     };
     influencer?: {
       id?: string;
@@ -2968,7 +2970,6 @@ export type InfluencerMatchScoreResponse = {
       categoryNames?: string[];
       subcategoryNames?: string[];
       interests?: string[];
-      platforms?: string[];
       followers?: number;
       engagementRate?: string;
     };
@@ -3154,7 +3155,6 @@ export type BrandCreatorFolderItem = {
   handle?: string;
   email?: string;
   provider?: string;
-  platform?: string;
   country?: string;
   language?: string;
   location?: string;
@@ -3260,7 +3260,6 @@ export type NewInvitationRow = {
   invitationId: string;
   brandId: string;
   handle: string;
-  platform: string;
   status: NewInvitationStatus;
   campaignId?: string | null;
   campaignName?: string | null;
@@ -3299,7 +3298,6 @@ export async function apiNewInvitationsList(payload: NewInvitationsListPayload) 
 
 export type CreateNewInvitationPayload = {
   handle: string;
-  platform: string;
   brandId: string;
   status: "invited" | "available";
   campaignId?: string;

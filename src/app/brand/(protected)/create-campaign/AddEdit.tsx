@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/buttonComp";
 import { FloatingInput } from "@/components/ui/floatingInput";
 import { FloatingMultiSelect, FloatingSelect, SelectItem } from "@/components/ui/selectComp";
 import { LabeledTextarea } from "@/components/ui/textAreaComp";
-import { ProductImagesUpload } from "@/components/ui/upload-card";
 import { ProductCardUpload } from "@/components/ui/productCard-Image";
 import { ManualPreviewCardStack, toMap } from "@/components/ui/cardPreview";
 import { FloatingDateInput } from "@/components/ui/date";
@@ -42,12 +41,9 @@ import {
   isObjectId,
   isValidDateRange,
   LAYOUT,
-  MANUAL_PLATFORM_OPTIONS,
-  mapPlatforms,
   MAX_FILE_MB,
   Option,
   pickCampaignId,
-  platformToUi,
   safeDateInput,
   SEARCHABLE_UI,
   SEEN_KEY,
@@ -56,12 +52,26 @@ import {
   validateFiles,
   mergeOptions,
   prettyTierValue,
+  getLocalCampaignTimezone,
+  toCampaignDateTimeInput,
 } from "./create-campaign.utils";
 
 import { ScheduleCampaignOverlay, normalizeTimeZone } from "./ScheduleCampaignOverlay";
 import { useCampaignLists, useCategoryPicker, useResponsivePreviewWidth, useSidebarOffsetPx } from "./create-campaign.hooks";
 
-import { CaretDown, CaretUp, Clock, Eye, EyeClosed, Info, PaperPlaneTilt, SparkleIcon } from "@phosphor-icons/react";
+import {
+  CaretDown,
+  CaretUp,
+  Clock,
+  Eye,
+  EyeClosed,
+  Info,
+  PaperPlaneRightIcon,
+  SparkleIcon,
+  ImageSquare,
+  LinkSimple,
+  X,
+} from "@phosphor-icons/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import SparkleAnimation from "@/components/ui/StarTwinkle";
 
@@ -285,7 +295,6 @@ type ManualForm = {
   startDate: string;
   endDate: string;
 
-  platforms: string[];
   targetCountry: string[];
   targetAgeGroups: string[];
 
@@ -319,7 +328,6 @@ const EMPTY_MANUAL: ManualForm = {
   startDate: "",
   endDate: "",
 
-  platforms: [],
   targetCountry: [],
   targetAgeGroups: [],
 
@@ -440,23 +448,32 @@ const TODAY = todayISO();
 /* ============================================================================
    ✅ Payload builders
 ============================================================================ */
-async function buildCreateAIPayload(form: CampaignForm, uploadedImages: Array<{ dataUrl: string; name: string; type: string; contentType: string; originalSize: number; size: number; key: string }>, opts?: { saveDraft?: boolean }): Promise<PrefillCampaignAIPayload> {
+type UploadedAIImage = {
+  dataUrl: string;
+  name: string;
+  type: string;
+  contentType: string;
+  originalSize: number;
+  size: number;
+  key: string;
+};
+
+async function buildCreateAIPayload(
+  form: CampaignForm,
+  uploadedImages: UploadedAIImage[],
+  opts?: { saveDraft?: boolean }
+): Promise<PrefillCampaignAIPayload> {
   const brandId = getBrandId();
-  const productImages = await filesToDataUrls(form.files ?? []);
+  const prompt = form.description.trim();
 
   return {
     brandId,
-    campaignTitle: form.title.trim(),
-    description: form.description.trim(),
-    campaignType: form.campaignType,
-    categoryId: form.categoryId,
-    subcategoryIds: form.subcategory,
+    description: prompt,
+    campaignPrompt: prompt,
     productImages: uploadedImages,
     productLink: form.productLink.trim() || undefined,
-    targetCountryIds: form.country,
-    targetAgeRanges: form.ageGroup,
     saveDraft: opts?.saveDraft ?? false,
-  };
+  } as PrefillCampaignAIPayload;
 }
 /* ============================================================================
    ✅ Helpers
@@ -475,7 +492,7 @@ function buildCreateManualPayload(
   savedProductImages: SavedProductImage[] = []
 ) {
   const brandId = getBrandId();
-
+  const campaignTimezone = getLocalCampaignTimezone();
   const base: CreateCampaignManualPayload = {
     brandId,
     campaignTitle: form.title.trim(),
@@ -493,8 +510,6 @@ function buildCreateManualPayload(
     contentFormats: form.contentFormats,
     contentLanguageIds: form.contentLanguage,
 
-    platformSelection: mapPlatforms(form.platforms),
-
     targetCountryIds: form.targetCountry,
     targetAgeRanges: form.targetAgeGroups,
     preferredHashtags: form.hashtags,
@@ -508,8 +523,9 @@ function buildCreateManualPayload(
 
     additionalNotes: form.additionalNotes || undefined,
 
-    startAt: form.startDate || undefined,
-    endAt: form.endDate || undefined,
+    campaignTimezone,
+    startAt: toCampaignDateTimeInput(form.startDate, "start") || undefined,
+    endAt: toCampaignDateTimeInput(form.endDate, "end") || undefined,
   };
 
   if (!includeFiles) return base;
@@ -528,6 +544,7 @@ async function buildEditDraftPayload(
   savedProductImages: SavedProductImage[] = []
 ): Promise<EditDraftPayload> {
   const newImages = await filesToDataUrls(form.productFiles ?? []);
+  const campaignTimezone = getLocalCampaignTimezone();
 
   return compact({
     brandId,
@@ -546,7 +563,6 @@ async function buildEditDraftPayload(
     influencerTierIds: form.influencerTier,
     contentFormats: form.contentFormats,
     contentLanguageIds: form.contentLanguage,
-    platformSelection: mapPlatforms(form.platforms),
     targetCountryIds: form.targetCountry,
     targetAgeRanges: form.targetAgeGroups,
     preferredHashtags: form.hashtags,
@@ -556,8 +572,9 @@ async function buildEditDraftPayload(
     campaignBudget: Number(form.campaignBudget || 0),
     paymentType: form.paymentType,
     additionalNotes: form.additionalNotes || undefined,
-    startAt: form.startDate || undefined,
-    endAt: form.endDate || undefined,
+    campaignTimezone,
+    startAt: toCampaignDateTimeInput(form.startDate, "start") || undefined,
+    endAt: toCampaignDateTimeInput(form.endDate, "end") || undefined,
   }) as EditDraftPayload;
 }
 
@@ -579,7 +596,6 @@ function validateManualForm(args: {
 
   if (!form.subcategories?.length) e.subcategories = "Select at least 1 subcategory.";
   if (!form.goals?.length) e.goals = "Select at least 1 campaign goal.";
-  if (!form.platforms?.length) e.platforms = "Select at least 1 platform.";
   if (!form.targetCountry?.length) e.targetCountry = "Select at least 1 country.";
   if (!form.targetAgeGroups?.length) e.targetAgeGroups = "Select at least 1 age group.";
 
@@ -719,12 +735,12 @@ function useMediaQuery(query: string) {
    ✅ AI Screen
 ============================================================================ */
 function CreateByAIScreen({
-  sidebarOffsetPx,
-  onBack,
-  onSwitchToManual,
+  sidebarOffsetPx: _sidebarOffsetPx,
+  onBack: _onBack,
+  onSwitchToManual: _onSwitchToManual,
   onCreated,
-  maxWidth = LAYOUT.aiMaxWidth,
-  lists,
+  maxWidth: _maxWidth = LAYOUT.aiMaxWidth,
+  lists: _lists,
   showSparkle,
   setShowSparkle,
 }: {
@@ -738,57 +754,165 @@ function CreateByAIScreen({
   setShowSparkle: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const { form, setField } = useCampaignForm();
-  const progress = useMemo(() => calcProgress(form), [form]);
 
-  const categoryPicker = useCategoryPicker({ debounceMs: 250, enabled: true });
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [fileErrors, setFileErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-
-  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+
+  const suggestions = useMemo(
+    () => [
+      { icon: "🏆", text: "Launch a new sneaker collection for Gen Z" },
+      { icon: "📱", text: "Promote a mobile app installation campaign" },
+      { icon: "🎮", text: "Create a gaming influencer campaign" },
+      { icon: "🍔", text: "Drive awareness for a new restaurant launch" },
+      { icon: "💻", text: "Generate a B2B SaaS creator campaign" },
+    ],
+    []
+  );
+
+  const loadingMessages = useMemo(
+    () => [
+      "Fetching the details...",
+      "Analyzing your campaign brief...",
+      "Reading product images and references...",
+      "Choosing matching categories...",
+      "Finding target countries and age groups...",
+      "Building creator requirements...",
+      "Preparing your manual campaign draft...",
+    ],
+    []
+  );
+
+  useEffect(() => {
+    if (!submitting && !showSparkle) {
+      setLoadingMessageIndex(0);
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setLoadingMessageIndex((prev) => (prev + 1) % loadingMessages.length);
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, [submitting, showSparkle, loadingMessages.length]);
+
+  const imagePreviewItems = useMemo(
+    () =>
+      (form.files ?? []).map((file, index) => ({
+        file,
+        index,
+        url: URL.createObjectURL(file),
+      })),
+    [form.files]
+  );
+
+  useEffect(() => {
+    return () => {
+      imagePreviewItems.forEach((item) => URL.revokeObjectURL(item.url));
+    };
+  }, [imagePreviewItems]);
+
+  const promptBoxStyle = useMemo<React.CSSProperties>(
+    () => ({
+      borderRadius: "1rem",
+      border: "2px solid rgba(193, 193, 193, 0.60)",
+      background:
+        "radial-gradient(193.33% 58.29% at 50% 50%, rgba(255, 255, 255, 0.00) 45%, rgba(255, 255, 255, 0.12) 100%), linear-gradient(0deg, rgba(255, 255, 255, 0.20) 0%, rgba(255, 255, 255, 0.20) 100%), linear-gradient(180deg, rgba(17, 0, 0, 0.01) 0%, rgba(188, 182, 237, 0.06) 100%)",
+      boxShadow:
+        "0 7px 15px -12px rgba(176, 194, 250, 0.20), 0 4px 10.3px 0 rgba(0, 0, 0, 0.03), 0 17px 25.8px -12px rgba(0, 0, 0, 0.06), 0 4px 6px 0 rgba(255, 255, 255, 0.32), 0 -1px 18px 0 rgba(255, 255, 255, 0.40) inset, 0 -1px 14px 0 rgba(255, 255, 255, 0.56) inset, 0 0 16px 0 rgba(0, 0, 0, 0.02) inset, 0 -4px 8px 0 rgba(0, 0, 0, 0.03) inset, 0 -1px 2px 0 rgba(0, 0, 0, 0.02) inset, 0 -0.5px 0.5px 0 rgba(0, 0, 0, 0.04) inset, 0 10px 12px 0 rgba(0, 0, 0, 0.04) inset",
+    }),
+    []
+  );
+
+  const suggestionCardStyle = useMemo<React.CSSProperties>(
+    () => ({
+      borderRadius: "var(--Border-Radius-S, 0.5rem)",
+      background: "var(--Light-Background-Primary, #FFF)",
+    }),
+    []
+  );
 
   const pushAiError = useCallback((title: string, eOrMsg: unknown) => {
     const msg = typeof eOrMsg === "string" ? eOrMsg : getApiErrorMessage(eOrMsg);
     toastError(title, msg);
   }, []);
 
-  const touch = useCallback((k: string) => setTouched((p) => (p[k] ? p : { ...p, [k]: true })), []);
-  const shouldShow = useCallback((k: string) => Boolean(submitAttempted || touched[k]), [submitAttempted, touched]);
+  const linkError = useMemo(() => {
+    const link = form.productLink.trim();
+    if (!link) return "";
+    return /^https?:\/\/.+/i.test(link) ? "" : "Please enter a valid http/https link.";
+  }, [form.productLink]);
 
-  const aiErrors = useMemo(() => {
-    return {
-      description: !form.description.trim() ? "Description is required." : "",
-    };
-  }, [form]);
+  const hasImagePreviews = imagePreviewItems.length > 0;
+  const hasLinkValue = Boolean(form.productLink.trim());
+  const shouldShowLinkChip = linkOpen || hasLinkValue;
+  const hasTopContent = hasImagePreviews || shouldShowLinkChip;
 
-  const stateFor = useCallback((_key: string, msg: string) => (submitAttempted && msg ? ("error" as const) : undefined), [submitAttempted]);
-  const msgFor = useCallback((_key: string, msg: string) => (submitAttempted ? msg : ""), [submitAttempted]);
-  const canContinueAI = useMemo(() => Object.values(aiErrors).every((x) => !x), [aiErrors]);
+  const SearchSparkleIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <path
+        d="M6.98145 2.04395C6.80457 2.48154 6.69535 2.95431 6.6709 3.44922C5.89391 3.63256 5.17617 4.02891 4.60254 4.60254C3.78988 5.4152 3.33301 6.51772 3.33301 7.66699L3.33887 7.88184C3.39207 8.95276 3.84074 9.96965 4.60254 10.7314C5.41517 11.5439 6.51787 12 7.66699 12C8.81615 11.9999 9.91886 11.544 10.7314 10.7314C11.493 9.96988 11.9407 8.95341 11.9941 7.88281C12.472 7.77057 12.919 7.58009 13.3213 7.32422C13.3282 7.43795 13.333 7.55241 13.333 7.66699C13.3329 8.94984 12.8968 10.1867 12.1084 11.1826L13.7861 12.8623C14.0465 13.1227 14.0465 13.5443 13.7861 13.8047C13.5258 14.0648 13.104 14.0649 12.8438 13.8047L11.1631 12.124C10.1706 12.9026 8.9414 13.3329 7.66699 13.333C6.1641 13.333 4.72189 12.7365 3.65918 11.6738C2.59665 10.6112 2.00009 9.16969 2 7.66699C2 6.1641 2.59647 4.72189 3.65918 3.65918C4.55902 2.75934 5.73111 2.19623 6.98145 2.04395Z"
+        fill="#969696"
+      />
+      <path
+        d="M13.8404 0.717232C13.7875 0.684239 13.7264 0.666748 13.6641 0.666748C13.5945 0.666706 13.5267 0.688442 13.4701 0.728907C13.4135 0.769372 13.371 0.826537 13.3485 0.892387L13.2319 1.23468L12.8901 1.35133L12.8508 1.36733C12.7915 1.39635 12.7422 1.44231 12.7091 1.49938C12.676 1.55646 12.6605 1.62209 12.6647 1.68795C12.669 1.75381 12.6926 1.81694 12.7327 1.86933C12.7728 1.92172 12.8276 1.96103 12.8901 1.98226L13.2323 2.09891L13.3489 2.44087L13.3649 2.47986C13.3938 2.53914 13.4398 2.58849 13.4968 2.62164C13.5538 2.65479 13.6194 2.67026 13.6853 2.66608C13.7511 2.6619 13.8142 2.63827 13.8666 2.59818C13.919 2.55808 13.9583 2.50333 13.9796 2.44087L14.0962 2.09857L14.4381 1.98192L14.4774 1.96592C14.5366 1.93691 14.5859 1.89095 14.619 1.83387C14.6522 1.77679 14.6676 1.71116 14.6634 1.6453C14.6592 1.57944 14.6355 1.51632 14.5954 1.46392C14.5553 1.41153 14.5005 1.37223 14.4381 1.351L14.0959 1.23435L13.9793 0.892387L13.9633 0.853392C13.9358 0.7974 13.8933 0.750226 13.8404 0.717232Z"
+        fill="#969696"
+      />
+      <path
+        d="M10.1991 6.53212C10.3402 6.62011 10.5031 6.66675 10.6693 6.66675C10.8548 6.66686 11.0356 6.6089 11.1865 6.50099C11.3374 6.39308 11.4508 6.24064 11.5107 6.06504L11.8217 5.15226L12.7333 4.84119L12.8381 4.79853C12.9961 4.72115 13.1276 4.59859 13.2159 4.44638C13.3042 4.29417 13.3454 4.11917 13.3341 3.94354C13.3229 3.76792 13.2598 3.59958 13.1528 3.45986C13.0459 3.32014 12.8998 3.21534 12.7333 3.15873L11.8208 2.84766L11.5098 1.93577L11.4671 1.83178C11.3899 1.67369 11.2674 1.54211 11.1153 1.45371C10.9632 1.36531 10.7883 1.32406 10.6127 1.3352C10.4372 1.34633 10.2689 1.40935 10.1291 1.51627C9.98941 1.62318 9.88456 1.76918 9.82786 1.93577L9.51689 2.84854L8.60529 3.15962L8.50044 3.20228C8.34243 3.27966 8.21094 3.40222 8.12264 3.55442C8.03433 3.70663 7.99319 3.88164 8.00442 4.05727C8.01564 4.23289 8.07874 4.40123 8.18571 4.54095C8.29268 4.68066 8.43871 4.78547 8.60529 4.84208L9.51778 5.15315L9.82875 6.06504L9.8714 6.16903C9.94454 6.31834 10.0581 6.44414 10.1991 6.53212Z"
+        fill="#969696"
+      />
+    </svg>
+  );
+
+  const handleFiles = useCallback(
+    (files: FileList | null) => {
+      const incoming = Array.from(files ?? []).filter((file) => file.type.startsWith("image/"));
+
+      if (!incoming.length) return;
+
+      const errors = validateFiles(incoming, "Image");
+      setFileErrors(errors);
+
+      if (errors.length) return;
+
+      setField("files", [...(form.files ?? []), ...incoming]);
+    },
+    [form.files, setField]
+  );
+
+  const removeFile = useCallback(
+    (idx: number) => {
+      setField(
+        "files",
+        (form.files ?? []).filter((_, i) => i !== idx)
+      );
+      setFileErrors([]);
+    },
+    [form.files, setField]
+  );
 
   const submitAI = useCallback(async () => {
     setSubmitting(true);
+
     try {
-      // ✅ Step 1: Upload files first → get S3 URLs
-      let uploadedImages: Array<{
-        dataUrl: string;
-        name: string;
-        type: string;
-        contentType: string;
-        originalSize: number;
-        size: number;
-        key: string;
-      }> = [];
+      let uploadedImages: UploadedAIImage[] = [];
 
       if (form.files?.length) {
         const uploadRes = await apiUploadImages(form.files);
         const urls: string[] = uploadRes?.urls ?? uploadRes?.data?.urls ?? [];
 
-        // ✅ Step 2: Map S3 URLs with file metadata by index
+        if (!urls.length) {
+          throw new Error("Image upload failed. No image URLs returned from backend.");
+        }
+
         uploadedImages = urls.map((url, i) => {
           const file = form.files[i];
-          const key =
-            url.split("/campaign-images/")[1] ?? url.split("/").pop() ?? "";
+          const key = url.split("/campaign-images/")[1] ?? url.split("/").pop() ?? "";
 
           return {
             dataUrl: url,
@@ -802,25 +926,20 @@ function CreateByAIScreen({
         });
       }
 
-      // ✅ Step 3: Build payload with S3 URLs — no base64
-      const payload = await buildCreateAIPayload(
-        form,
-        uploadedImages,  // ← pass uploaded images
-        { saveDraft: false }
-      );
+      const payload = await buildCreateAIPayload(form, uploadedImages, {
+        saveDraft: false,
+      });
 
       const res: any = await apiCampaignPrefillAI(payload);
 
-      const pseudoDoc = {
-        ...(res?.prefill ?? {}),
-        details: res?.prefillDetails ?? res?.details ?? null,
+      return {
+        ...(res?.prefill ?? res?.data?.prefill ?? res ?? {}),
+        details: res?.prefillDetails ?? res?.data?.prefillDetails ?? res?.details ?? null,
         byAi: 1,
         status: "draft",
-      };
-
-      return pseudoDoc as EnrichedCampaignDoc;
+      } as EnrichedCampaignDoc;
     } catch (e) {
-      pushAiError("Failed to create draft", e);
+      pushAiError("Failed to create AI campaign", e);
       return null;
     } finally {
       setSubmitting(false);
@@ -829,92 +948,300 @@ function CreateByAIScreen({
 
   const handleContinue = useCallback(async () => {
     setSubmitAttempted(true);
-    if (!canContinueAI || submitting) return;
+
+    if (!form.description.trim()) {
+      toastError("Campaign description required", "Please describe your campaign first.");
+      return;
+    }
+
+    if (linkError) {
+      toastError("Invalid link", linkError);
+      return;
+    }
+
+    if (submitting) return;
 
     setShowSparkle(true);
 
     try {
       const doc = await submitAI();
-      if (!doc) throw new Error("submitAI failed");
+      if (!doc) return;
 
       onCreated(doc);
-      toastSuccess("AI prefilled", "We filled the manual form. Review and publish.");
-    } catch (err) {
-      console.error("submitAI error:", err);
+      toastSuccess("AI campaign generated", "Review the filled campaign details before publishing.");
     } finally {
       setShowSparkle(false);
     }
-  }, [canContinueAI, submitting, submitAI, onCreated, setShowSparkle]);
-
-  const bottomBarMaxW = maxWidth + 140;
-
-  const catSearchProps = useSearchProps(categoryPicker.search, categoryPicker.setSearch);
-  const ageSearchProps = useSearchProps(lists.search.ageRanges.value, lists.search.ageRanges.onChange);
-  const countrySearchProps = useSearchProps(lists.search.countries.value, lists.search.countries.onChange);
+  }, [form.description, linkError, submitting, submitAI, onCreated, setShowSparkle]);
 
   return (
-    <>
-      <div className="cg-page-frame flex-1 min-w-0 w-full bg-linear-to-tl from-pink-50 via-white to-pink-50">
-        <div
-          className="cg-page-scroll overflow-y-auto"
-          style={{
-            ["--cg-maxw" as any]: `${maxWidth}px`,
-            paddingBottom: "calc(var(--cg-bottombar-h, 72px) + 24px)",
-          }}
-        >
-          <div className="mx-auto w-full cg-maxw px-4 sm:px-6 lg:px-0">
-            <div className="cg-card p-5 shadow-2xl border-neutral-300">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="cg-card-title">Create with AI</div>
-                  <div className="cg-card-subtitle">Let AI turn your idea into a ready-to-launch campaign.</div>
-                </div>
+    <div className="relative min-h-[100dvh] w-full overflow-hidden bg-[linear-gradient(135deg,#fff1f7_0%,#ffffff_34%,#ffffff_64%,#fff0f4_100%)]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_100%,rgba(255,224,130,0.45)_0%,rgba(255,182,193,0.24)_22%,rgba(255,255,255,0)_50%)]" />
+      <div className="pointer-events-none absolute left-[-140px] top-[-140px] h-[340px] w-[340px] rounded-full bg-pink-100/50 blur-3xl" />
+      <div className="pointer-events-none absolute right-[-180px] bottom-[-160px] h-[380px] w-[380px] rounded-full bg-rose-100/60 blur-3xl" />
 
-                <Button variant="outline" onClick={onSwitchToManual} className="shrink-0">
-                  Create Manual
-                </Button>
-              </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          handleFiles(e.currentTarget.files);
+          e.currentTarget.value = "";
+        }}
+      />
 
-              <div className="mt-4">
-                <ProgressBar value={progress} heightClassName="h-[3px]" barClassName="bg-success-500" />
-              </div>
+      {submitting || showSparkle ? (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-950/60 backdrop-blur-[1px]">
+          <div className="flex flex-col items-center justify-center">
+            <SparkleAnimation key="ai-campaign-loading" className="scale-[1.8]" />
 
-              <div className="mt-5 flex flex-col gap-4">
-                <LabeledTextarea
-                  label="Description"
-                  placeholder={`Describe your campaign goals, product details, and what creators should focus on.
-
-You can paste links to your website, product pages, reference videos, or brand guidelines.`}
-                  value={form.description}
-                  required
-                  minLength={50}
-                  maxLength={500}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setField("description", e.target.value)}
-                  onBlur={() => touch("ai.description")}
-                  state={stateFor("ai.description", aiErrors.description)}
-                  errorText={msgFor("ai.description", aiErrors.description)}
-                />
-              </div>
-            </div>
+            <p
+              key={loadingMessages[loadingMessageIndex]}
+              className="mt-7 animate-pulse text-center font-inter text-[12px] font-[500] leading-[16px] text-white"
+            >
+              {loadingMessages[loadingMessageIndex]}
+            </p>
           </div>
         </div>
-      </div>
+      ) : null}
 
-      <FixedBottomBar
-        sidebarOffsetPx={sidebarOffsetPx}
-        containerMaxWidth={bottomBarMaxW}
-        right={
-          <>
-            <Button variant="raised" className="shadow-none" onClick={onBack} disabled={submitting}>
-              Go Back
-            </Button>
-            <Button onClick={handleContinue} disabled={submitting}>
-              {submitting ? "Creating…" : "Continue"}
-            </Button>
-          </>
-        }
-      />
-    </>
+      <div className="relative z-10 mx-auto flex w-full max-w-[820px] flex-col items-center px-5 pt-[112px]">
+        <h1
+          className="text-center font-inter"
+          style={{
+            color: "var(--Text-Primary, #1A1A1A)",
+            fontSize: "var(--Font-Size-24, 1.5rem)",
+            fontStyle: "normal",
+            fontWeight: "var(--Font-Weight-bold, 700)",
+            lineHeight: "var(--Line-Height-32, 2rem)",
+            letterSpacing: "var(--Letter-Spacing-0, 0)",
+          }}
+        >
+          Create your campaign with the help AI
+        </h1>
+
+        <p
+          className="mt-2 max-w-[720px] text-center font-inter"
+          style={{
+            color: "var(--Light-Text-Tertiary, #B8B8B8)",
+            fontSize: "var(--Font-Size-16, 1rem)",
+            fontStyle: "normal",
+            fontWeight: "var(--Font-Weight-Medium, 500)",
+            lineHeight: "var(--Line-Height-24, 1.5rem)",
+            letterSpacing: "var(--Letter-Spacing-0, 0)",
+          }}
+        >
+          Describe your product, audience, and goals. AI will generate campaign
+          briefs, deliverables, milestones, budgets, and creator requirements.
+        </p>
+
+        <div className="mt-9 w-full max-w-[680px] overflow-hidden" style={promptBoxStyle}>
+          <div className={cn("flex flex-col", hasTopContent ? "min-h-[190px]" : "min-h-[150px]")}>
+            {hasTopContent ? (
+              <div className="flex w-full flex-wrap items-start gap-2 px-[14px] pb-3 pt-[12px]">
+                {imagePreviewItems.map((item) => (
+                  <div
+                    key={`${item.file.name}-${item.index}`}
+                    className="relative h-[60px] w-[60px] shrink-0 overflow-hidden rounded-[0.75rem] border border-white/80 bg-white/20 shadow-[0_8px_18px_rgba(0,0,0,0.08)]"
+                  >
+                    <img
+                      src={item.url}
+                      alt={item.file.name}
+                      className="h-full w-full object-cover"
+                    />
+
+                    <button
+                      type="button"
+                      aria-label="Remove image"
+                      onClick={() => removeFile(item.index)}
+                      className="absolute right-[4px] top-[4px] flex h-[14px] w-[14px] items-center justify-center rounded-full bg-white/90 text-[#969696] shadow-sm transition hover:text-[#1A1A1A]"
+                    >
+                      <X size={9} />
+                    </button>
+                  </div>
+                ))}
+
+                {shouldShowLinkChip ? (
+                  linkOpen ? (
+                    <div className="flex h-[34px] max-w-full items-center rounded-[0.5rem] border border-white/80 bg-white/10 px-2 shadow-[0_6px_14px_rgba(0,0,0,0.05)] backdrop-blur-sm">
+                      <button
+                        type="button"
+                        aria-label="Close link input"
+                        onClick={() => setLinkOpen(false)}
+                        className="mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[#B8B8B8] hover:text-[#1A1A1A]"
+                      >
+                        <X size={11} />
+                      </button>
+
+                      <input
+                        autoFocus
+                        value={form.productLink}
+                        placeholder="Paste product or reference link"
+                        onChange={(e) => setField("productLink", e.target.value)}
+                        onBlur={() => {
+                          if (form.productLink.trim()) setLinkOpen(false);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            setLinkOpen(false);
+                          }
+
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setLinkOpen(false);
+                          }
+                        }}
+                        className="h-full w-[360px] max-w-[52vw] bg-transparent font-inter text-[0.875rem] font-[400] leading-[1.25rem] text-[#1A1A1A] outline-none placeholder:text-[#B8B8B8]"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex h-[34px] max-w-full items-center rounded-[0.5rem] border border-white/80 bg-white/10 px-2 font-inter text-[0.875rem] font-[400] leading-[1.25rem] text-[#969696] shadow-[0_6px_14px_rgba(0,0,0,0.05)] backdrop-blur-sm">
+                      <button
+                        type="button"
+                        aria-label="Remove link"
+                        onClick={() => {
+                          setField("productLink", "");
+                          setLinkOpen(false);
+                        }}
+                        className="mr-2 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[#969696] hover:text-[#1A1A1A]"
+                      >
+                        <X size={11} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setLinkOpen(true)}
+                        className="min-w-0 text-left"
+                      >
+                        <span className="block max-w-[420px] truncate">
+                          {form.productLink}
+                        </span>
+                      </button>
+                    </div>
+                  )
+                ) : null}
+              </div>
+            ) : null}
+
+            <div
+              className={cn(
+                "relative min-h-0 flex-1",
+                hasTopContent ? "px-[14px]" : "px-[14px] pt-[12px]"
+              )}
+            >
+              {!hasTopContent ? (
+                <div className="pointer-events-none absolute left-[16px] top-[15px] z-10 flex h-4 w-4 items-center justify-center">
+                  <SearchSparkleIcon />
+                </div>
+              ) : null}
+
+              <textarea
+                value={form.description}
+                placeholder="Describe your campaign......"
+                onChange={(e) => setField("description", e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    handleContinue();
+                  }
+                }}
+                className={cn(
+                  "block w-full resize-none bg-transparent font-inter text-[0.875rem] font-[400] leading-[1.25rem] tracking-[0] text-[#1A1A1A] outline-none placeholder:text-[#B8B8B8]",
+                  "scrollbar-thin scrollbar-thumb-white/70 scrollbar-track-transparent",
+                  hasTopContent
+                    ? "h-[102px] max-h-[102px] px-0 py-1"
+                    : "h-[82px] max-h-[82px] px-[28px] py-0"
+                )}
+                style={{
+                  overflowY: "auto",
+                  overflowX: "hidden",
+                  scrollbarWidth: "thin",
+                  textOverflow: "clip",
+                }}
+              />
+            </div>
+
+            <div className="flex shrink-0 items-center justify-between px-[22px] pb-[12px] pt-[10px]">
+              <div className="flex items-center gap-[10px]">
+                <button
+                  type="button"
+                  aria-label="Upload campaign images"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex h-[22px] w-[22px] items-center justify-center rounded-[6px] text-[#1A1A1A] transition hover:bg-white/60"
+                >
+                  <ImageSquare size={17} />
+                </button>
+
+                <span className="h-[18px] w-px bg-[#C1C1C1]/40" />
+
+                <button
+                  type="button"
+                  aria-label="Add campaign link"
+                  onClick={() => setLinkOpen(true)}
+                  className="flex h-[22px] w-[22px] items-center justify-center rounded-[6px] text-[#1A1A1A] transition hover:bg-white/60"
+                >
+                  <LinkSimple size={17} />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                aria-label="Generate campaign"
+                onClick={handleContinue}
+                disabled={submitting}
+                className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-[10px] p-[1.5px] shadow-[0_6px_12px_rgba(0,0,0,0.12)] transition disabled:cursor-not-allowed disabled:opacity-60"
+                style={{
+                  background:
+                    "linear-gradient(109deg, var(--Neutrals-0, #FFF) 28.8%, #FAFAFA 36.05%, rgba(255, 191, 0, 0.83) 50%, #F6BB2A 57.65%, #F3584E 74.04%, #E078D1 84.62%), var(--Light-Background-Subtle, #F9F9F9)",
+                }}
+              >
+                <span className="flex h-full w-full items-center justify-center rounded-[8.5px] bg-[#1A1A1A] text-white transition hover:bg-black">
+                  <PaperPlaneRightIcon size={18} weight="fill" />
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {fileErrors.length ? (
+            <div className="border-t border-white/60 px-3 py-2 font-inter text-[12px] text-red-500">
+              {fileErrors[0]}
+            </div>
+          ) : null}
+
+          {submitAttempted && linkError ? (
+            <div className="border-t border-white/60 px-3 py-2 font-inter text-[12px] text-red-500">
+              {linkError}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-5 flex w-full max-w-[580px] flex-col gap-2">
+          {suggestions.map((item) => (
+            <button
+              key={item.text}
+              type="button"
+              onClick={() => setField("description", item.text)}
+              className="flex h-[36px] w-full items-center px-3 text-left transition hover:shadow-[0_4px_14px_rgba(0,0,0,0.04)]"
+              style={suggestionCardStyle}
+            >
+              <span className="mr-1.5 text-[12px] leading-[1rem]">{item.icon}</span>
+              <span className="truncate font-inter text-[0.75rem] font-[500] leading-[1rem] text-[#B8B8B8]">
+                {item.text}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {submitAttempted && !form.description.trim() ? (
+          <p className="mt-3 text-center font-inter text-[13px] text-red-500">
+            Please describe your campaign first.
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -980,6 +1307,98 @@ function SideModalPreview({
   );
 }
 
+function PublishCampaignDialog({
+  open,
+  loading,
+  campaignTitle,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  loading?: boolean;
+  campaignTitle?: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !loading) onClose();
+    };
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, loading, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center px-4">
+      <button
+        type="button"
+        aria-label="Close publish confirmation"
+        className="absolute inset-0 bg-black/45 backdrop-blur-[2px]"
+        disabled={loading}
+        onClick={onClose}
+      />
+
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="publish-campaign-dialog-title"
+        className="relative w-full max-w-[420px] overflow-hidden rounded-[20px] border border-[#E6E6E6] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.18)]"
+      >
+        <div className="px-6 pt-6">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#FFF7E0]">
+            <PaperPlaneRightIcon size={24} weight="fill" className="text-[#F6BB2A]" />
+          </div>
+
+          <h2
+            id="publish-campaign-dialog-title"
+            className="mt-4 text-center font-inter text-[20px] font-[700] leading-[28px] text-[#1A1A1A]"
+          >
+            Publish campaign?
+          </h2>
+
+          <p className="mt-2 text-center font-inter text-[14px] font-[400] leading-[20px] text-[#777777]">
+            This campaign will go live and creators will be able to view and apply for it.
+          </p>
+
+          {campaignTitle?.trim() ? (
+            <div className="mt-4 rounded-[12px] border border-[#EFEFEF] bg-[#FAFAFA] px-4 py-3 text-center font-inter text-[13px] font-[500] leading-[18px] text-[#1A1A1A]">
+              {campaignTitle}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-6 flex items-center justify-end gap-2 border-t border-[#EFEFEF] bg-white px-5 py-4">
+          <Button
+            type="button"
+            variant="outline"
+            className="shadow-none"
+            disabled={loading}
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+
+          <Button type="button" disabled={loading} onClick={onConfirm}>
+            <PaperPlaneRightIcon size={16} className="mr-2" />
+            {loading ? "Publishing…" : "Yes, Publish"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ============================================================================
    ✅ Manual Screen
 ============================================================================ */
@@ -1019,6 +1438,7 @@ function CreateManualScreen({
 
   const [campaignId, setCampaignId] = useState<string>("");
   const [publishing, setPublishing] = useState(false);
+  const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
 
   const [draftSaving, setDraftSaving] = useState(false);
   const [draftJustSaved, setDraftJustSaved] = useState(false);
@@ -1354,7 +1774,6 @@ function CreateManualScreen({
         campaignBudget: Number(doc?.campaignBudget ?? 0),
         startDate: safeDateInput(doc?.startAt ?? doc?.startDate),
         endDate: safeDateInput(doc?.endAt ?? doc?.endDate),
-        platforms: (Array.isArray(doc?.platformSelection) ? doc.platformSelection : []).map(platformToUi).filter(Boolean),
         targetCountry: idsOf(doc?.targetCountryIds ?? details?.targetCountries),
         targetAgeGroups: idsOf(doc?.targetAgeRanges ?? details?.targetAgeRanges),
         additionalNotes: String(doc?.additionalNotes ?? ""),
@@ -1561,7 +1980,6 @@ function CreateManualScreen({
       form.numberOfInfluencers > 0,
       form.influencerTier.length > 0,
       form.contentFormats.length > 0,
-      form.platforms.length > 0,
       form.targetCountry.length > 0,
       form.targetAgeGroups.length > 0,
       form.paymentType.trim().length > 0,
@@ -1616,6 +2034,7 @@ function CreateManualScreen({
 
     setSubmitAttempted(false);
     setServerFieldErrors({});
+    setPublishConfirmOpen(false);
   }, [categoryPicker]);
 
   const saveDraftManually = useCallback(async () => {
@@ -1817,7 +2236,6 @@ function CreateManualScreen({
             influencerTierIds: form.influencerTier,
             contentFormats: form.contentFormats,
             contentLanguageIds: form.contentLanguage,
-            platformSelection: mapPlatforms(form.platforms),
             targetCountryIds: form.targetCountry,
             targetAgeRanges: form.targetAgeGroups,
             preferredHashtags: form.hashtags,
@@ -1831,8 +2249,9 @@ function CreateManualScreen({
             campaignBudget: Number(form.campaignBudget || 0),
             paymentType: form.paymentType,
             additionalNotes: form.additionalNotes || undefined,
-            startAt: form.startDate || undefined,
-            endAt: form.endDate || undefined,
+            campaignTimezone: getLocalCampaignTimezone(),
+            startAt: toCampaignDateTimeInput(form.startDate, "start") || undefined,
+            endAt: toCampaignDateTimeInput(form.endDate, "end") || undefined,
           }) as EditDraftPayload;
 
           const updated: any = await apiCampaignEditDraft(payload);
@@ -1925,6 +2344,34 @@ function CreateManualScreen({
       router,
     ]
   );
+
+  const openPublishConfirm = useCallback(() => {
+    setSubmitAttempted(true);
+    setServerFieldErrors({});
+    setApiError("");
+
+    const errs = validateManualForm({
+      form,
+      dateOk,
+      blockingFileErrors: productFileErrors,
+      savedProductImageCount: savedProductImages.length,
+    });
+
+    if (Object.values(errs).some(Boolean)) return;
+
+    const brandId = getBrandId();
+    if (!brandId) {
+      toastError("Login required", "BrandId missing. Please login again.");
+      return;
+    }
+
+    setPublishConfirmOpen(true);
+  }, [form, dateOk, productFileErrors, savedProductImages.length]);
+
+  const confirmPublishCampaign = useCallback(() => {
+    setPublishConfirmOpen(false);
+    doPublish("active" as CampaignStatus);
+  }, [doPublish]);
 
   const previewMeta = useMemo(() => {
     const strip = (s: string) => String(s || "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
@@ -2256,23 +2703,8 @@ function CreateManualScreen({
                         </div>
                       </AccordionCard>
 
-                      <AccordionCard title="Audience & Platforms" subtitle="Choose where and who this campaign should reach.">
+                      <AccordionCard title="Audience" subtitle="Choose who this YouTube campaign should reach.">
                         <div className="grid gap-4 md:grid-cols-2">
-                          <div className="md:col-span-2">
-                            <FloatingMultiSelect
-                              {...SEARCHABLE_UI}
-                              label="Platform Selection"
-                              required
-                              value={form.platforms}
-                              options={MANUAL_PLATFORM_OPTIONS}
-                              onValueChange={(next) => setField("platforms", next)}
-                              includeAll={false}
-                              searchable={false}
-                              state={stateFor("platforms")}
-                              errorText={msgFor("platforms")}
-                            />
-                          </div>
-
                           <FloatingMultiSelect
                             {...countrySearchProps}
                             label="Target country"
@@ -2401,6 +2833,16 @@ function CreateManualScreen({
         />
       )}
 
+      <PublishCampaignDialog
+        open={publishConfirmOpen}
+        loading={publishing}
+        campaignTitle={form.title}
+        onClose={() => {
+          if (!publishing) setPublishConfirmOpen(false);
+        }}
+        onConfirm={confirmPublishCampaign}
+      />
+
       <FixedBottomBar
         sidebarOffsetPx={sidebarOffsetPx}
         containerMaxWidth={computedBottomBarMaxW}
@@ -2436,8 +2878,8 @@ function CreateManualScreen({
               {publishing ? "Saving…" : "Schedule Campaign"}
             </Button>
 
-            <Button onClick={() => doPublish("active")} disabled={publishing}>
-              <PaperPlaneTilt size={16} className="mr-2" />
+            <Button onClick={openPublishConfirm} disabled={publishing}>
+              <PaperPlaneRightIcon size={16} className="mr-2" />
               {publishing ? "Publishing…" : "Publish Campaign"}
             </Button>
           </>
