@@ -18,6 +18,7 @@ import {
   apiCampaignEditDraft,
   apiCampaignGetById2,
   apiCampaignPrefillAI,
+  apiCampaignGetByBrand,
   apiGetTimezonesByCountries,
   getApiErrorMessage,
   CampaignStatus,
@@ -28,6 +29,8 @@ import {
   GetTimezonesByCountriesResponse,
   apiUploadImages,
 } from "../../services/brandApi";
+
+import { BrandWelcomeModal } from "@/components/ui/brand/BrandWelcomeModal";
 
 import {
   CAMPAIGN_TYPES,
@@ -206,6 +209,25 @@ function FixedBottomBar({
       </div>
     </div>
   );
+}
+
+function getCampaignTotal(res: any) {
+  const items =
+    res?.items ??
+    res?.data?.items ??
+    res?.data ??
+    [];
+
+  const total = Number(
+    res?.meta?.total ??
+    res?.data?.meta?.total ??
+    res?.pagination?.total ??
+    res?.data?.pagination?.total ??
+    res?.total ??
+    items.length,
+  );
+
+  return Number.isFinite(total) ? total : 0;
 }
 
 /* ============================================================================
@@ -1029,7 +1051,7 @@ function CreateByAIScreen({
             letterSpacing: "var(--Letter-Spacing-0, 0)",
           }}
         >
-          Create your campaign with the help AI
+          Create your campaign with the help Of AI
         </h1>
 
         <p
@@ -2911,6 +2933,7 @@ export default function CreateCampaignPage() {
   const [view, setView] = useState<"loading" | "intro" | "manual" | "ai">("loading");
   const sidebarOffsetPx = useSidebarOffsetPx();
   const [showSparkle, setShowSparkle] = useState(false);
+  const [welcomeModalOpen, setWelcomeModalOpen] = useState(false);
 
   const [manualFromCampaign, setManualFromCampaign] = useState<EnrichedCampaignDoc | null>(null);
 
@@ -2970,6 +2993,43 @@ export default function CreateCampaignPage() {
     clearActions();
     return () => clearActions();
   }, [view, clearActions]);
+
+  useEffect(() => {
+    if (!byAi || editCampaignId) {
+      setWelcomeModalOpen(false);
+      return;
+    }
+
+    const brandId = getBrandId();
+
+    if (!brandId) {
+      setWelcomeModalOpen(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await apiCampaignGetByBrand({
+          brandId,
+          page: 1,
+          limit: 1,
+        });
+
+        if (cancelled) return;
+
+        setWelcomeModalOpen(getCampaignTotal(res) === 0);
+      } catch {
+        if (cancelled) return;
+        setWelcomeModalOpen(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [byAi, editCampaignId]);
 
   const markSeen = useCallback(() => {
     try {
@@ -3050,9 +3110,20 @@ export default function CreateCampaignPage() {
       </CenterWrap>
     );
   }
+  const withWelcomeModal = (children: React.ReactNode) => (
+    <>
+      <BrandWelcomeModal
+        open={welcomeModalOpen}
+        brandId={getBrandId()}
+        onClose={() => setWelcomeModalOpen(false)}
+      />
+
+      {children}
+    </>
+  );
 
   if (view === "ai") {
-    return (
+    return withWelcomeModal(
       <CreateByAIScreen
         sidebarOffsetPx={sidebarOffsetPx}
         onBack={() => setView("intro")}
@@ -3064,11 +3135,13 @@ export default function CreateCampaignPage() {
         lists={lists}
         showSparkle={showSparkle}
         setShowSparkle={setShowSparkle}
-      />
+      />,
     );
   }
 
-  return (
+
+
+  return withWelcomeModal(
     <CreateManualScreen
       sidebarOffsetPx={sidebarOffsetPx}
       onBack={() => setView("intro")}
@@ -3080,6 +3153,6 @@ export default function CreateCampaignPage() {
       onAfterPublish={() => setManualFromCampaign(null)}
       showSparkle={showSparkle}
       setShowSparkle={setShowSparkle}
-    />
+    />,
   );
 }

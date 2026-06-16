@@ -47,7 +47,7 @@ const DEFAULT_ITEMS: Testimonial[] = [
     quote:
       "“What stood out most was the quality of creators and the ease of collaboration. Our team saved countless hours on outreach and campaign coordination.”",
     avatarSrc:
-      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image15.png",
+      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/sihoo+logo.svg",
     rating: 4.5,
   },
   {
@@ -58,7 +58,7 @@ const DEFAULT_ITEMS: Testimonial[] = [
     quote:
       "“A reliable platform for brands looking to build authentic creator partnerships. The workflow is smooth, transparent, and results-driven.”",
     avatarSrc:
-      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image16.png",
+      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/jackery.webp",
     rating: 5,
   },
   {
@@ -69,7 +69,7 @@ const DEFAULT_ITEMS: Testimonial[] = [
     quote:
       "“The creator search filters are incredibly useful. It takes minutes instead of hours to find relevant influencers.”",
     avatarSrc:
-      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image17.png",
+      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/dreme+tech.webp",
     rating: 4,
   },
   {
@@ -80,7 +80,7 @@ const DEFAULT_ITEMS: Testimonial[] = [
     quote:
       "“The quality of creators on CollabGlam has been impressive. We've built some great long-term partnerships through the platform.”",
     avatarSrc:
-      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image18.png",
+      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/anker.png",
     rating: 4.5,
   },
   {
@@ -91,7 +91,7 @@ const DEFAULT_ITEMS: Testimonial[] = [
     quote:
       "“One of the easiest platforms we've used for collaborations.”",
     avatarSrc:
-      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image19.png",
+      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/votoman.png",
     rating: 4.5,
   },
   

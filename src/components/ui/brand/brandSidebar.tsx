@@ -339,6 +339,10 @@ function WalletBalancePill({ value }: { value: string }) {
     </div>
   );
 }
+function normalizeRoutePath(value: string) {
+  const pathOnly = value.split("?")[0] ?? value;
+  return pathOnly.replace(/\/+$/, "") || "/";
+}
 
 const RowButton = React.memo(function RowButton({
   active,
@@ -623,8 +627,12 @@ export default function BrandSidebar({
   const routePairs = useMemo(() => {
     return Object.entries(ROUTES)
       .filter(([key, path]) => key !== "campaigns" && Boolean(path))
-      .map(([key, path]) => ({ key, path }))
-      .sort((a, b) => b.path.length - a.path.length);
+      .map(([key, path]) => ({
+        key,
+        path,
+        matchPath: normalizeRoutePath(path),
+      }))
+      .sort((a, b) => b.matchPath.length - a.matchPath.length);
   }, []);
 
   const clamp = useCallback((v: number, min: number, max: number) => {
@@ -833,9 +841,11 @@ export default function BrandSidebar({
   useEffect(() => {
     if (!pathname) return;
 
-    const currentPath = pathname.replace(/\/+$/, "") || "/";
+    const currentPath = normalizeRoutePath(pathname);
+
     const match = routePairs.find(
-      ({ path }) => currentPath === path || currentPath.startsWith(`${path}/`)
+      ({ matchPath }) =>
+        currentPath === matchPath || currentPath.startsWith(`${matchPath}/`)
     );
 
     const nextKey =
@@ -1440,7 +1450,6 @@ export default function BrandSidebar({
                 transition={motionTransitions.content}
                 className="mb-4 w-full text-[16px] font-semibold text-neutral-600"
               >
-                Manage
               </m.div>
             )}
           </AnimatePresence>

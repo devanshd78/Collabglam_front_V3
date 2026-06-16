@@ -12,6 +12,10 @@ import { FloatingInput } from "@/components/ui/floatingInput";
 import { PasswordInput } from "@/components/ui/password";
 import { Button, buttonVariants } from "@/components/ui/buttonComp";
 import { VggCardStack } from "@/components/ui/brand/VggAnimatedCard";
+import {
+  BrandWelcomeModal,
+  shouldShowBrandWelcomeModal,
+} from "@/components/ui/brand/BrandWelcomeModal";
 
 import {
   apiGoogleSignInBrand,
@@ -55,14 +59,13 @@ type BrandSignInResponse = {
   name?: string;
   profilePic?: string;
   isNewBrand?: boolean;
+  isFirstLogin?: boolean;
   route?: OnboardingRoute;
   onboarding?: {
     aliasDone?: boolean;
     page1Done?: boolean;
     page2Done?: boolean;
     page3Done?: boolean;
-
-    // Optional skip flags, supported if backend sends them.
     ispage1Skip?: boolean;
     ispage2Skip?: boolean;
     ispage3Skip?: boolean;
@@ -424,6 +427,16 @@ function BrandLoginContentInner() {
 
   const [emailError, setEmailError] = React.useState<string>("");
   const [passwordError, setPasswordError] = React.useState<string>("");
+
+  const [welcomeModal, setWelcomeModal] = React.useState<{
+    open: boolean;
+    brandId: string;
+    fallbackHref: string;
+  }>({
+    open: false,
+    brandId: "",
+    fallbackHref: "/brand/create-campaign?byAi=1",
+  });
   const emailInvalid = !!emailError;
   const passwordInvalid = !!passwordError;
   const emailTrimmed = email.trim();
@@ -505,6 +518,21 @@ function BrandLoginContentInner() {
     }
 
     return routeToBrandPath(resolveBrandPostLoginRoute(res));
+  };
+
+  const continueAfterBrandAuth = (res: BrandSignInResponse) => {
+    const redirectHref = getPostLoginRedirect(res);
+
+    if (shouldShowBrandWelcomeModal(res)) {
+      setWelcomeModal({
+        open: true,
+        brandId: res.brandId,
+        fallbackHref: redirectHref,
+      });
+      return;
+    }
+
+    router.replace(redirectHref);
   };
 
   const clearEmailOnFocus = () => {
@@ -603,7 +631,7 @@ function BrandLoginContentInner() {
         }),
       );
 
-      router.replace(getPostLoginRedirect(res));
+      continueAfterBrandAuth(res);
     } catch (err) {
       toast({
         icon: "error",
@@ -671,6 +699,11 @@ function BrandLoginContentInner() {
   return (
     <div className="min-h-screen bg-background text-foreground relative">
       <ToastStyles />
+      <BrandWelcomeModal
+  open={welcomeModal.open}
+  brandId={welcomeModal.brandId}
+  fallbackHref={welcomeModal.fallbackHref}
+/>
 
       <header className="w-full bg-white border-b border-bd-primary">
         <div

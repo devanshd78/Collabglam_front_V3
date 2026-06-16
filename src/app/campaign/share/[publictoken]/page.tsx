@@ -288,9 +288,6 @@ export default function PublicCampaignPage() {
                     <span className="rounded-full bg-white/10 px-3 py-1 text-xs">
                       {paymentTypeText}
                     </span>
-                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs">
-                      {platformText}
-                    </span>
                   </div>
                 </div>
               </div>
@@ -375,20 +372,6 @@ export default function PublicCampaignPage() {
                 <span className="text-[#969696]">Payment Type</span>
                 <span className="text-right font-medium text-[#1A1A1A]">
                   {paymentTypeText}
-                </span>
-              </div>
-
-              <div className="flex items-start justify-between gap-4 border-b border-[#F1F1F1] pb-3">
-                <span className="text-[#969696]">Platforms</span>
-                <span className="text-right font-medium text-[#1A1A1A]">
-                  {platformText}
-                </span>
-              </div>
-
-              <div className="flex items-start justify-between gap-4">
-                <span className="text-[#969696]">Brand</span>
-                <span className="text-right font-medium text-[#1A1A1A]">
-                  {campaign?.brandName || "—"}
                 </span>
               </div>
             </div>
@@ -511,15 +494,6 @@ export default function PublicCampaignPage() {
           ) : (
             <div className="mt-5 text-sm text-[#969696]">No images available</div>
           )}
-        </div>
-
-        <div className="rounded-[1.25rem] border border-[#E6E6E6] bg-white p-6">
-          <h2 className="text-xl font-semibold text-[#1A1A1A]">
-            Additional Notes
-          </h2>
-          <div className="mt-4 whitespace-pre-wrap text-sm leading-6 text-[#1A1A1A]">
-            {campaign?.additionalNotes || "—"}
-          </div>
         </div>
       </div>
     </div>
