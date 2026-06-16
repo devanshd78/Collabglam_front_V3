@@ -53,6 +53,7 @@ import InviteMembersModal from "@/components/ui/brand/inviteMember";
 /* -------------------------------- routing -------------------------------- */
 
 const CAMPAIGN_PREFIX = "/brand/campaign";
+const SUBSCRIPTION_CARD_HIDDEN_KEY = "brand-subscription-card-hidden";
 
 const ROUTES: Record<string, string> = {
   dashboard: "/brand/dashboard",
@@ -463,6 +464,7 @@ export default function BrandSidebar({
     top: 0,
     left: 0,
   });
+  const [showSubscriptionCard, setShowSubscriptionCard] = useState(true);
 
   const helpAnchorRef = useRef<HTMLDivElement | null>(null);
   const helpDialogRef = useRef<HTMLDivElement | null>(null);
@@ -908,6 +910,16 @@ export default function BrandSidebar({
     };
   }, [brandId]);
 
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const hidden = window.localStorage.getItem(SUBSCRIPTION_CARD_HIDDEN_KEY);
+      setShowSubscriptionCard(hidden !== "true");
+    } catch { }
+  }, []);
+
   useEffect(() => {
     if (!profileMenuOpen) return;
 
@@ -980,6 +992,19 @@ export default function BrandSidebar({
     router.push("/brand/subscriptions");
     if (!isDesktop) setDrawerOpen(false);
   }, [router, isDesktop, setDrawerOpen]);
+
+  const handleHideSubscriptionCard = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.stopPropagation();
+
+      setShowSubscriptionCard(false);
+
+      try {
+        window.localStorage.setItem(SUBSCRIPTION_CARD_HIDDEN_KEY, "true");
+      } catch { }
+    },
+    []
+  );
 
   const openHelpDialog = useCallback(() => {
     const rect = helpAnchorRef.current?.getBoundingClientRect();
@@ -1476,40 +1501,55 @@ export default function BrandSidebar({
               transition={motionTransitions.content}
               className="flex flex-col items-center gap-4"
             >
-              <SidebarTooltip
-                content={isPaidPlan ? `Manage ${planLabel} plan` : "Upgrade to PRO"}
-              >
-                <m.button
-                  type="button"
-                  aria-label={isPaidPlan ? `Manage ${planLabel} plan` : "Upgrade to PRO"}
-                  onClick={handlePlanClick}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.98 }}
-                  transition={upgradeSpring}
-                  className={cn(
-                    "relative grid place-items-center overflow-hidden",
-                    tight ? "h-12 w-12" : "h-14 w-14",
-                    FOCUS_RING
-                  )}
-                  style={{
-                    borderRadius: "var(--Spacing-8, 8px)",
-                    background: UPGRADE_COLLAPSED,
-                    willChange: "transform",
-                  }}
-                >
-                  <Lightning size={24} className="text-[#1a1a1a]" />
-                  {isPaidPlan && (
-                    <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-[#1a1a1a]" />
-                  )}
-                </m.button>
-              </SidebarTooltip>
+              {showSubscriptionCard && (
+                <>
+                  <div className="relative">
+                    <SidebarTooltip
+                      content={isPaidPlan ? `Manage ${planLabel} plan` : "Upgrade to PRO"}
+                    >
+                      <m.button
+                        type="button"
+                        aria-label={isPaidPlan ? `Manage ${planLabel} plan` : "Upgrade to PRO"}
+                        onClick={handlePlanClick}
+                        whileHover={{ scale: 1.03 }}
+                        whileTap={{ scale: 0.98 }}
+                        transition={upgradeSpring}
+                        className={cn(
+                          "relative grid place-items-center overflow-hidden",
+                          tight ? "h-12 w-12" : "h-14 w-14",
+                          FOCUS_RING
+                        )}
+                        style={{
+                          borderRadius: "var(--Spacing-8, 8px)",
+                          background: UPGRADE_COLLAPSED,
+                          willChange: "transform",
+                        }}
+                      >
+                        <Lightning size={24} className="text-[#1a1a1a]" />
+                      </m.button>
+                    </SidebarTooltip>
 
-              <div
-                className={cn(
-                  "my-5 h-px w-full bg-neutral-200",
-                  tight ? "my-4" : ""
-                )}
-              />
+                    <button
+                      type="button"
+                      aria-label="Hide subscription card"
+                      onClick={handleHideSubscriptionCard}
+                      className={cn(
+                        "absolute -right-2 -top-2 z-10 grid h-5 w-5 place-items-center rounded-full bg-white text-[#1a1a1a] shadow-sm transition hover:bg-neutral-100",
+                        FOCUS_RING
+                      )}
+                    >
+                      <X size={12} weight="bold" />
+                    </button>
+                  </div>
+
+                  <div
+                    className={cn(
+                      "my-5 h-px w-full bg-neutral-200",
+                      tight ? "my-4" : ""
+                    )}
+                  />
+                </>
+              )}
 
               <SidebarTooltip content="Profile">
                 <button
@@ -1546,80 +1586,97 @@ export default function BrandSidebar({
               className="w-full"
               style={{ opacity: isDesktop && isClosing ? 0 : 1 }}
             >
-              <m.div
-                initial="rest"
-                animate="rest"
-                whileHover="hover"
-                transition={upgradeSpring}
-                className={cn(
-                  "relative flex w-full cursor-pointer flex-col items-start gap-2.5 overflow-hidden p-2",
-                  FOCUS_RING
-                )}
-                style={upgradeShellStyle}
-                tabIndex={0}
-                role="button"
-                onClick={handlePlanClick}
-              >
-                <div
-                  className="pointer-events-none absolute inset-0"
-                  style={{
-                    background: UPGRADE_REST,
-                    borderRadius: "inherit",
-                  }}
-                />
+              {showSubscriptionCard && (
+                <>
+                  <m.div
+                    initial="rest"
+                    animate="rest"
+                    whileHover="hover"
+                    transition={upgradeSpring}
+                    className={cn(
+                      "relative flex w-full cursor-pointer flex-col items-start gap-2.5 overflow-hidden p-2 pr-9",
+                      FOCUS_RING
+                    )}
+                    style={upgradeShellStyle}
+                    tabIndex={0}
+                    role="button"
+                    onClick={handlePlanClick}
+                  >
+                    <button
+                      type="button"
+                      aria-label="Hide subscription card"
+                      onClick={handleHideSubscriptionCard}
+                      className={cn(
+                        "absolute right-2 top-2 z-20 grid h-7 w-7 place-items-center rounded-full bg-white/85 text-[#1a1a1a] shadow-sm transition hover:bg-white",
+                        FOCUS_RING
+                      )}
+                    >
+                      <X size={14} weight="bold" />
+                    </button>
 
-                <m.div
-                  className="pointer-events-none absolute inset-0"
-                  style={{
-                    background: UPGRADE_HOVER,
-                    borderRadius: "inherit",
-                  }}
-                  variants={{ rest: { opacity: 0 }, hover: { opacity: 1 } }}
-                  transition={upgradeSpring}
-                />
+                    <div
+                      className="pointer-events-none absolute inset-0"
+                      style={{
+                        background: UPGRADE_REST,
+                        borderRadius: "inherit",
+                      }}
+                    />
 
-                <div className="relative z-10 flex w-full flex-col items-start gap-2.5">
-                  <div className="flex w-full items-start justify-between gap-3">
-                    <div className="relative h-6 w-6">
-                      <m.span
-                        className="absolute inset-0 grid place-items-center"
-                        variants={{ rest: { opacity: 1 }, hover: { opacity: 0 } }}
-                        transition={upgradeSpring}
-                      >
-                        <Lightning
-                          size={24}
-                          weight="regular"
-                          className="text-[#1a1a1a]"
-                        />
-                      </m.span>
+                    <m.div
+                      className="pointer-events-none absolute inset-0"
+                      style={{
+                        background: UPGRADE_HOVER,
+                        borderRadius: "inherit",
+                      }}
+                      variants={{ rest: { opacity: 0 }, hover: { opacity: 1 } }}
+                      transition={upgradeSpring}
+                    />
 
-                      <m.span
-                        className="absolute inset-0 grid place-items-center"
-                        variants={{ rest: { opacity: 0 }, hover: { opacity: 1 } }}
-                        transition={upgradeSpring}
-                      >
-                        <Lightning
-                          size={24}
-                          weight="fill"
-                          className="text-[#1a1a1a]"
-                        />
-                      </m.span>
+                    <div className="relative z-10 flex w-full flex-col items-start gap-2.5">
+                      <div className="relative h-6 w-6">
+                        <m.span
+                          className="absolute inset-0 grid place-items-center"
+                          variants={{ rest: { opacity: 1 }, hover: { opacity: 0 } }}
+                          transition={upgradeSpring}
+                        >
+                          <Lightning
+                            size={24}
+                            weight="regular"
+                            className="text-[#1a1a1a]"
+                          />
+                        </m.span>
+
+                        <m.span
+                          className="absolute inset-0 grid place-items-center"
+                          variants={{ rest: { opacity: 0 }, hover: { opacity: 1 } }}
+                          transition={upgradeSpring}
+                        >
+                          <Lightning
+                            size={24}
+                            weight="fill"
+                            className="text-[#1a1a1a]"
+                          />
+                        </m.span>
+                      </div>
+
+                      <div className="text-[18px] font-semibold leading-[24px] text-[#1a1a1a]">
+                        {upgradeCardTitle}
+                      </div>
+
+                      <div className="font-[Inter] text-[14px] font-normal leading-[18px] text-[#1a1a1a]">
+                        {upgradeCardDesc}
+                      </div>
                     </div>
+                  </m.div>
 
-                    <span className="inline-flex items-center rounded-full border border-white/70 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-[#1a1a1a]">
-                      {planLabel}
-                    </span>
-                  </div>
-
-                  <div className="text-[18px] font-semibold leading-[24px] text-[#1a1a1a]">
-                    {upgradeCardTitle}
-                  </div>
-
-                  <div className="font-[Inter] text-[14px] font-normal leading-[18px] text-[#1a1a1a]">
-                    {upgradeCardDesc}
-                  </div>
-                </div>
-              </m.div>
+                  <div
+                    className={cn(
+                      "my-5 h-px w-full bg-neutral-200",
+                      tight ? "my-4" : ""
+                    )}
+                  />
+                </>
+              )}
 
               <div
                 className={cn(

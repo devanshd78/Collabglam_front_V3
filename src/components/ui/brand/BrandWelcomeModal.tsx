@@ -152,7 +152,6 @@ export function BrandWelcomeModal({
                         {[
                             ["✨", "Create AI-powered campaigns in seconds", "SO EASY"],
                             ["👥", "Find the best-fit creators for your brand", "NO CAP"],
-                            ["🚀", "Boost reach, engagement & ROI like a pro", "LEVEL UP"],
                             ["💗", "Real collabs. Real results. Zero fluff.", "PERIODT"],
                         ].map(([icon, text, badge]) => (
                             <div key={text} className="flex items-center gap-[10px]">
@@ -185,7 +184,7 @@ export function BrandWelcomeModal({
                             onClick={() => finish("/brand/browse-influencer")}
                             className="flex h-[45px] w-full items-center justify-center rounded-[12px] border border-[#E6E6E6] bg-white text-[13px] font-semibold text-[#1A1A1A] transition hover:bg-[#FAFAFA] active:bg-[#F5F5F5]"
                         >
-                            Discover Influencer
+                            Browse Creators
                         </button>
                     </div>
                 </div>

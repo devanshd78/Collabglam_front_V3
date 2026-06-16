@@ -1051,7 +1051,7 @@ function CreateByAIScreen({
             letterSpacing: "var(--Letter-Spacing-0, 0)",
           }}
         >
-          Create your campaign with the help Of AI
+          Create your campaign with the help of AI
         </h1>
 
         <p
