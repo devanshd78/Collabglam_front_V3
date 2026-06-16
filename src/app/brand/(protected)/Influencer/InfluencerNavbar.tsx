@@ -36,9 +36,26 @@ export default function CampaignNavBar() {
     searchParams.get("id") ||
     ""
   ).trim();
+  const campaignTitleFromUrl = useMemo(() => {
+    return String(
+      searchParams.get("campaignTitle") ||
+      searchParams.get("campaignName") ||
+      searchParams.get("name") ||
+      ""
+    ).trim();
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (campaignTitleFromUrl) {
+      setCampaignTitle(campaignTitleFromUrl);
+    }
+  }, [campaignTitleFromUrl]);
 
   const [brandId, setBrandId] = useState("");
   const [isAdminCreatedCampaign, setIsAdminCreatedCampaign] = useState(false);
+  const [campaignTitle, setCampaignTitle] = useState("");
+
+
 
   useEffect(() => {
     const id =
@@ -75,6 +92,19 @@ export default function CampaignNavBar() {
           .trim()
           .toLowerCase();
 
+        const title = String(
+          campaign?.campaignName ||
+          campaign?.campaignTitle ||
+          campaign?.title ||
+          campaign?.name ||
+          campaign?.productOrServiceName ||
+          ""
+        ).trim();
+
+        if (title) {
+          setCampaignTitle(title);
+        }
+
         setIsAdminCreatedCampaign(createdByRole === "admin");
       } catch (e) {
         if (cancelled) return;
@@ -94,44 +124,63 @@ export default function CampaignNavBar() {
     };
   }, [brandId, campaignId]);
 
-  const withCampaignId = (href: string) => {
-    if (!campaignId) return href;
+  const withCampaignParams = (href: string) => {
+    const [baseHref, existingQuery = ""] = href.split("?");
 
-    const join = href.includes("?") ? "&" : "?";
+    const params = new URLSearchParams(existingQuery);
+    const currentParams = new URLSearchParams(searchParams.toString());
 
-    return `${href}${join}campaignId=${encodeURIComponent(campaignId)}`;
+    currentParams.forEach((value, key) => {
+      params.set(key, value);
+    });
+
+    if (campaignId) {
+      params.set("campaignId", campaignId);
+    }
+
+    const title = String(
+      campaignTitle ||
+      campaignTitleFromUrl ||
+      searchParams.get("campaignName") ||
+      searchParams.get("campaignTitle") ||
+      ""
+    ).trim();
+
+    if (title) {
+      params.set("campaignName", title);
+      params.set("campaignTitle", title);
+    }
+
+    const queryString = params.toString();
+
+    return queryString ? `${baseHref}?${queryString}` : baseHref;
   };
 
   const tabs: TabItem[] = [
     {
       key: "all influencer",
       label: "All Influencer",
-      href: "/brand/influ/all",
+      href: "/brand/Influencer/all",
     },
     {
       key: "applied",
       label: "Applied",
-      href: "/brand/influ/applied",
+      href: "/brand/Influencer/applied",
     },
     {
       key: "active",
       label: "Active",
-      href: "/brand/influ/active",
+      href: "/brand/Influencer/active",
     },
     {
       key: "shortlisted",
       label: "Shortlisted",
-      href: "/brand/influ/shortlisted",
-    },
-    {
-      key: "undecided",
-      label: "Undecided",
-      href: "/brand/influ/undecided",
+      href: "/brand/Influencer/shortlisted",
     },
     {
       key: "rejected",
       label: "Rejected",
-      href: "/brand/influ/rejected",
+      href: "/brand/Influencer/rejected",
     },
   ];
 
@@ -169,7 +218,7 @@ export default function CampaignNavBar() {
           return (
             <Link
               key={t.key}
-              href={withCampaignId(t.href)}
+              href={withCampaignParams(t.href)}
               aria-current={isActive ? "page" : undefined}
               className={[
                 "inline-flex shrink-0 items-center justify-center",
@@ -215,7 +264,7 @@ export default function CampaignNavBar() {
         <div className="ml-3 flex shrink-0 items-center">
           <button
             type="button"
-            onClick={() => router.push(withCampaignId("/brand/influencer/invite"))}
+            onClick={() => router.push(withCampaignParams("/brand/influencer/invite"))}
             className={[
               "inline-flex items-center justify-center",
               "h-9 md:h-10",

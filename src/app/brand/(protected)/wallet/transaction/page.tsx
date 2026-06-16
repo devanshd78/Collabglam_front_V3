@@ -5,6 +5,7 @@ import {
   apiGetBrandWallet,
   apiGetWalletTopupHistory,
 } from "../../../services/brandApi";
+import { post } from "@/lib/api";
 import { toast, ToastStyles } from "@/components/ui/toast";
 
 type FilterTab = "all" | "today" | "week" | "month" | "failed";
@@ -36,6 +37,60 @@ type WalletTopup = {
   note?: string;
   addedByAdminId?: string | null;
   addedByAdminEmail?: string | null;
+};
+
+type PaymentHistoryItem = {
+  paymentType: "plan" | "milestone" | string;
+  orderId?: string;
+  paymentId?: string;
+  userId?: string;
+  role?: string;
+  planId?: string;
+  planName?: string;
+  amount?: number;
+  currency?: string;
+  status?: string;
+  receipt?: string;
+  invoiceNumber?: string;
+  invoiceIssuedAt?: string | null;
+  invoiceFilePath?: string;
+  paidAt?: string | null;
+  createdAt?: string;
+  subtotalCents?: number;
+  discountCents?: number;
+  taxCents?: number;
+  totalCents?: number;
+};
+
+type PaymentHistoryResponse = {
+  success: boolean;
+  message: string;
+  userId: string;
+  role: string;
+  counts: {
+    plans: number;
+    milestones: number;
+    total: number;
+  };
+  history: PaymentHistoryItem[];
+};
+
+type TransactionItem = {
+  id: string;
+  title: string;
+  amount: number;
+  amountPrefix: "+" | "-";
+  currency: string;
+  status: string;
+  source: string;
+  createdAt: string;
+  paidAt?: string | null;
+  stripeSessionId?: string;
+  campaignId?: string;
+  orderId?: string;
+  paymentId?: string;
+  invoiceNumber?: string;
+  receipt?: string;
 };
 
 const filterTabs: { key: FilterTab; label: string }[] = [
@@ -165,7 +220,10 @@ function normalizeWalletResponse(response: unknown): BrandWallet | null {
       return (res.data as BrandWalletResponse).data;
     }
 
-    if ("data" in response && isBrandWallet((response as BrandWalletResponse).data)) {
+    if (
+      "data" in response &&
+      isBrandWallet((response as BrandWalletResponse).data)
+    ) {
       return (response as BrandWalletResponse).data;
     }
   }
@@ -223,6 +281,50 @@ function normalizeTopupHistoryResponse(response: unknown): WalletTopup[] {
   return [];
 }
 
+function normalizePaymentHistoryResponse(response: unknown): PaymentHistoryItem[] {
+  const findPaymentHistory = (value: unknown): PaymentHistoryItem[] => {
+    if (!value || typeof value !== "object") return [];
+
+    const obj = value as {
+      history?: PaymentHistoryItem[];
+      payments?: PaymentHistoryItem[];
+      transactions?: PaymentHistoryItem[];
+      data?: unknown;
+    };
+
+    if (Array.isArray(obj.history)) return obj.history;
+    if (Array.isArray(obj.payments)) return obj.payments;
+    if (Array.isArray(obj.transactions)) return obj.transactions;
+
+    return [];
+  };
+
+  if (Array.isArray(response)) return response;
+
+  const direct = findPaymentHistory(response);
+  if (direct.length) return direct;
+
+  if (response && typeof response === "object" && "data" in response) {
+    const firstData = (response as { data?: unknown }).data;
+
+    if (Array.isArray(firstData)) return firstData;
+
+    const fromFirstData = findPaymentHistory(firstData);
+    if (fromFirstData.length) return fromFirstData;
+
+    if (firstData && typeof firstData === "object" && "data" in firstData) {
+      const secondData = (firstData as { data?: unknown }).data;
+
+      if (Array.isArray(secondData)) return secondData;
+
+      const fromSecondData = findPaymentHistory(secondData);
+      if (fromSecondData.length) return fromSecondData;
+    }
+  }
+
+  return [];
+}
+
 function formatMoney(amount = 0, currency = "usd") {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -231,7 +333,7 @@ function formatMoney(amount = 0, currency = "usd") {
   }).format(amount);
 }
 
-function formatDate(value?: string) {
+function formatDate(value?: string | null) {
   if (!value) return "-";
 
   const date = new Date(value);
@@ -247,14 +349,7 @@ function formatDate(value?: string) {
   }).format(date);
 }
 
-function shortId(value?: string | null) {
-  if (!value) return "-";
-  if (value.length <= 18) return value;
-
-  return `${value.slice(0, 10)}...${value.slice(-6)}`;
-}
-
-function getTransactionId(transaction: WalletTopup) {
+function getWalletTopupId(transaction: WalletTopup) {
   return (
     transaction.stripePaymentIntentId ||
     transaction.paymentIntentId ||
@@ -264,7 +359,74 @@ function getTransactionId(transaction: WalletTopup) {
   );
 }
 
-function isFailedTransaction(transaction: WalletTopup) {
+function getPaymentHistoryTitle(payment: PaymentHistoryItem) {
+  const paymentType = String(payment.paymentType || "").toLowerCase();
+
+  if (paymentType === "plan") {
+    return payment.planName ? `${payment.planName} Plan` : "Plan Payment";
+  }
+
+  if (paymentType === "milestone") {
+    return "Milestone Payment";
+  }
+
+  return "Payment";
+}
+
+function getPaymentHistoryAmount(payment: PaymentHistoryItem) {
+  const cents =
+    typeof payment.totalCents === "number"
+      ? payment.totalCents
+      : typeof payment.amount === "number"
+      ? payment.amount
+      : 0;
+
+  return cents / 100;
+}
+
+function normalizeWalletTopupToTransaction(
+  transaction: WalletTopup
+): TransactionItem {
+  const id = getWalletTopupId(transaction);
+
+  return {
+    id,
+    title: "Wallet Topup",
+    amount: transaction.amount ?? 0,
+    amountPrefix: "+",
+    currency: transaction.currency || "usd",
+    status: transaction.status || "-",
+    source: transaction.source || "Wallet Topup",
+    createdAt: transaction.createdAt,
+    stripeSessionId: transaction.stripeSessionId,
+    campaignId: transaction.campaignId,
+  };
+}
+
+function normalizePaymentToTransaction(
+  payment: PaymentHistoryItem
+): TransactionItem {
+  const id = payment.paymentId || payment.orderId || payment.receipt || "-";
+
+  return {
+    id,
+    title: getPaymentHistoryTitle(payment),
+    amount: getPaymentHistoryAmount(payment),
+    amountPrefix: "-",
+    currency: payment.currency || "usd",
+    status: payment.status || "-",
+    source: payment.paymentType || "Payment",
+    createdAt:
+      payment.createdAt || payment.paidAt || payment.invoiceIssuedAt || "",
+    paidAt: payment.paidAt,
+    orderId: payment.orderId,
+    paymentId: payment.paymentId,
+    invoiceNumber: payment.invoiceNumber,
+    receipt: payment.receipt,
+  };
+}
+
+function isFailedTransaction(transaction: TransactionItem) {
   const status = String(transaction.status || "").toLowerCase();
 
   return ["failed", "cancelled", "canceled", "rejected"].includes(status);
@@ -339,8 +501,8 @@ function ArrowDownRightIcon() {
 
 export default function TransactionHistoryPage() {
   const [activeFilter, setActiveFilter] = useState<FilterTab>("all");
-  const [transactions, setTransactions] = useState<WalletTopup[]>([]);
-  const [wallet, setWallet] = useState<BrandWallet | null>(null);
+  const [transactions, setTransactions] = useState<TransactionItem[]>([]);
+  const [, setWallet] = useState<BrandWallet | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   async function loadTransactionHistory() {
@@ -356,10 +518,16 @@ export default function TransactionHistoryPage() {
         return;
       }
 
-      const [walletResponse, historyResponse] = await Promise.allSettled([
-        apiGetBrandWallet({ brandId }),
-        apiGetWalletTopupHistory({ brandId }),
-      ]);
+      const [walletResponse, topupHistoryResponse, paymentHistoryResponse] =
+        await Promise.allSettled([
+          apiGetBrandWallet({ brandId }),
+          apiGetWalletTopupHistory({ brandId }),
+          post<PaymentHistoryResponse>("/payment/history", {
+            userId: brandId,
+            role: "Brand",
+            status: "all",
+          }),
+        ]);
 
       if (walletResponse.status === "fulfilled") {
         setWallet(normalizeWalletResponse(walletResponse.value));
@@ -367,21 +535,46 @@ export default function TransactionHistoryPage() {
         setWallet(null);
       }
 
-      if (historyResponse.status === "fulfilled") {
-        const topupHistory = normalizeTopupHistoryResponse(historyResponse.value);
-        setTransactions(topupHistory);
+      const combinedTransactions: TransactionItem[] = [];
 
-        if (!topupHistory.length) {
-          showToast("No topup history found in API response.", "info");
-        }
-      } else {
-        setTransactions([]);
-        showToast(
-          historyResponse.reason instanceof Error
-            ? historyResponse.reason.message
-            : "Unable to load transaction history.",
-          "error"
+      if (topupHistoryResponse.status === "fulfilled") {
+        const topupHistory = normalizeTopupHistoryResponse(
+          topupHistoryResponse.value
         );
+
+        combinedTransactions.push(
+          ...topupHistory.map(normalizeWalletTopupToTransaction)
+        );
+      }
+
+      if (paymentHistoryResponse.status === "fulfilled") {
+        const paymentHistory = normalizePaymentHistoryResponse(
+          paymentHistoryResponse.value
+        );
+
+        combinedTransactions.push(
+          ...paymentHistory.map(normalizePaymentToTransaction)
+        );
+      }
+
+      combinedTransactions.sort((a, b) => {
+        const firstDate = new Date(a.createdAt).getTime();
+        const secondDate = new Date(b.createdAt).getTime();
+
+        return secondDate - firstDate;
+      });
+
+      setTransactions(combinedTransactions);
+
+      if (!combinedTransactions.length) {
+        showToast("No transaction history found in API response.", "info");
+      }
+
+      if (
+        topupHistoryResponse.status === "rejected" &&
+        paymentHistoryResponse.status === "rejected"
+      ) {
+        showToast("Unable to load transaction history.", "error");
       }
     } catch (err) {
       showToast(
@@ -428,25 +621,33 @@ export default function TransactionHistoryPage() {
     }
 
     const headers = [
+      "Transaction Type",
       "Transaction ID",
-      "Stripe Session ID",
-      "Campaign ID",
+      "Order ID",
+      "Payment ID",
+      "Invoice Number",
+      "Receipt",
       "Amount",
       "Currency",
       "Status",
       "Source",
       "Created At",
+      "Paid At",
     ];
 
     const rows = filteredTransactions.map((transaction) => [
-      getTransactionId(transaction),
-      transaction.stripeSessionId || "-",
-      transaction.campaignId || "-",
-      String(transaction.amount ?? 0),
+      transaction.title,
+      transaction.id,
+      transaction.orderId || "-",
+      transaction.paymentId || "-",
+      transaction.invoiceNumber || "-",
+      transaction.receipt || "-",
+      `${transaction.amountPrefix}${transaction.amount.toFixed(2)}`,
       transaction.currency || "usd",
       transaction.status || "-",
       transaction.source || "-",
       formatDate(transaction.createdAt),
+      formatDate(transaction.paidAt),
     ]);
 
     const csv = [headers, ...rows]
@@ -465,7 +666,7 @@ export default function TransactionHistoryPage() {
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = "wallet-transaction-history.csv";
+    link.download = "transaction-history.csv";
     link.click();
 
     URL.revokeObjectURL(url);
@@ -520,12 +721,11 @@ export default function TransactionHistoryPage() {
         ) : filteredTransactions.length ? (
           <div className="w-full overflow-hidden bg-white">
             {filteredTransactions.map((transaction, index) => {
-              const transactionId = getTransactionId(transaction);
               const isFailed = isFailedTransaction(transaction);
 
               return (
                 <article
-                  key={`${transactionId}-${index}`}
+                  key={`${transaction.id}-${index}`}
                   className="flex w-full items-center justify-between border-b border-[#E6E6E6] bg-white px-[1rem] py-[1.25rem]"
                 >
                   <div className="flex min-w-0 items-center gap-[1rem]">
@@ -535,7 +735,7 @@ export default function TransactionHistoryPage() {
 
                     <div className="min-w-0">
                       <h2 className="truncate text-[1.25rem] font-medium leading-[1.75rem] tracking-[0] text-[#1A1A1A]">
-                        Wallet Topup
+                        {transaction.title}
                       </h2>
 
                       <p className="mt-[0.125rem] truncate text-[0.875rem] font-medium leading-[1.25rem] text-[#B8B8B8]">
@@ -548,10 +748,13 @@ export default function TransactionHistoryPage() {
                     <p
                       className={cn(
                         "text-[1.25rem] font-semibold leading-[1.75rem] tracking-[0]",
-                        isFailed ? "text-[#1A1A1A]" : "text-[#159447]"
+                        isFailed || transaction.amountPrefix === "-"
+                          ? "text-[#1A1A1A]"
+                          : "text-[#159447]"
                       )}
                     >
-                      +{formatMoney(transaction.amount, transaction.currency)}
+                      {transaction.amountPrefix}
+                      {formatMoney(transaction.amount, transaction.currency)}
                     </p>
 
                     <p className="mt-[0.125rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#B8B8B8]">

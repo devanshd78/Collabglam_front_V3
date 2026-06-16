@@ -148,7 +148,7 @@ export function BrandWelcomeModal({
                         your perfect creator match.
                     </p>
 
-                    <div className="mt-[18px] w-full space-y-[10px] text-left">
+                    <div className="mt-[20px] w-full space-y-[10px] text-left">
                         {[
                             ["✨", "Create AI-powered campaigns in seconds", "SO EASY"],
                             ["👥", "Find the best-fit creators for your brand", "NO CAP"],

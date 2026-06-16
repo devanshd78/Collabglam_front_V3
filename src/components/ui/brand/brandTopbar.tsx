@@ -76,6 +76,8 @@ const LABELS: Record<string, string> = {
   inbox: "Inbox",
   wallet: "Wallet",
   browse: "Browse Influencers",
+  influ: "Influencer",
+  active: "Active",
   "create-camapign": "Create Campaign",
 };
 
@@ -133,13 +135,54 @@ function getCampaignTitleFromSearch(searchParams: ReturnType<typeof useSearchPar
 function applyCampaignTitleToCrumbs(
   crumbs: { href: string; label: string }[],
   pathname: string,
-  campaignTitle: string
+  campaignTitle: string,
+  campaignId?: string | null
 ) {
   const safeTitle = safeDecodeURIComponent(campaignTitle).trim();
   if (!safeTitle) return crumbs;
 
   const segments = pathname.split("/").filter(Boolean);
-  const campaignIndex = segments.indexOf("campaign");
+  const lowerSegments = segments.map((seg) => seg.toLowerCase());
+
+  /**
+   * Special case:
+   * /brand/Influencer/active?campaignId=...&campaignName=...
+   *
+   * Breadcrumb should be:
+   * Influencer > CampaignName > Active
+   */
+  const influencerIndex = lowerSegments.indexOf("influencer");
+
+  if (influencerIndex >= 0 && segments[influencerIndex + 1]) {
+    const influencerHref = `/${segments.slice(0, influencerIndex + 1).join("/")}`;
+
+    const campaignHref = campaignId
+      ? `${pathname}?campaignId=${encodeURIComponent(
+        campaignId
+      )}&campaignName=${encodeURIComponent(safeTitle)}`
+      : `${pathname}?campaignName=${encodeURIComponent(safeTitle)}`;
+
+    const nextCrumbs: { href: string; label: string }[] = [];
+
+    crumbs.forEach((crumb) => {
+      nextCrumbs.push(crumb);
+
+      if (crumb.href === influencerHref) {
+        nextCrumbs.push({
+          href: campaignHref,
+          label: safeTitle,
+        });
+      }
+    });
+
+    return nextCrumbs;
+  }
+
+  /**
+   * Existing campaign route support:
+   * /brand/campaign/:id?campaignName=...
+   */
+  const campaignIndex = lowerSegments.indexOf("campaign");
 
   if (campaignIndex < 0 || !segments[campaignIndex + 1]) {
     return crumbs;
@@ -148,11 +191,10 @@ function applyCampaignTitleToCrumbs(
   const campaignIdHref = `/${segments.slice(0, campaignIndex + 2).join("/")}`;
 
   return crumbs.map((crumb) =>
-    crumb.href === campaignIdHref
-      ? { ...crumb, label: safeTitle }
-      : crumb
+    crumb.href === campaignIdHref ? { ...crumb, label: safeTitle } : crumb
   );
 }
+
 
 function getDefaultActions(pathname: string): TopbarAction[] {
   if (pathname.startsWith("/brand/campaigns")) {
@@ -252,8 +294,8 @@ export default function BrandTopbar({
   actionsOverride?: TopbarAction[];
   onMenuToggle?: () => void;
 }) {
-const pathname = usePathname();
-const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const isDesktop = useMediaQuery("(min-width: 1024px)");
   const isNarrow = useMediaQuery("(max-width: 640px)");
@@ -471,12 +513,18 @@ const searchParams = useSearchParams();
     }, 120);
   };
 
-const crumbs = useMemo(() => {
-  const baseCrumbs = getCrumbs(pathname);
-  const campaignTitle = getCampaignTitleFromSearch(searchParams);
+  const crumbs = useMemo(() => {
+    const baseCrumbs = getCrumbs(pathname);
+    const campaignTitle = getCampaignTitleFromSearch(searchParams);
+    const campaignId = searchParams.get("campaignId");
 
-  return applyCampaignTitleToCrumbs(baseCrumbs, pathname, campaignTitle);
-}, [pathname, searchParams]);
+    return applyCampaignTitleToCrumbs(
+      baseCrumbs,
+      pathname,
+      campaignTitle,
+      campaignId
+    );
+  }, [pathname, searchParams]);
 
   const displayCrumbs = useMemo(() => {
     if (!isNarrow) return crumbs;

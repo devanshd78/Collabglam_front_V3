@@ -1013,11 +1013,10 @@ export default function BrandDashboardHome() {
       title: "Influencers Engaged",
       value: workingInfluencerMetricValue,
       subtitle: dateFilterMode === "all" ? "All-time working influencers" : "Working influencers",
-      actionIcon: <ArrowUpRight size={16} weight="bold" />,
       avatarUsers: hasSelectedDateCampaignData ? workingInfluencers : [],
     },
     {
-      title: "Freeze Amount",
+      title: "Escrow Amount",
       value: formatMoney(frozenBalanceValue),
       subtitle: "Frozen balance",
       actionIcon: <ArrowUpRight size={16} weight="bold" />,
@@ -1179,13 +1178,13 @@ export default function BrandDashboardHome() {
               ))}
             </div>
 
-            <div className="grid w-full grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid w-full grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4 hover:bg-[#F9F9F9]">
               {quickActions.map((action) => (
                 <button
                   key={action.label}
                   type="button"
                   onClick={action.onClick}
-                  className="flex h-[3.75rem] items-center justify-between rounded-lg border border-[#E6E6E6] bg-white px-5 transition hover:bg-[#F7F7F7]"
+                  className="flex h-[3.75rem] items-center justify-between rounded-lg border border-[#E6E6E6] bg-white px-5 transition hover:bg-[#F7F7F7] "
                 >
                   <span className="flex items-center gap-2 font-inter text-[1rem] font-medium leading-6 text-[#1A1A1A]">
                     {action.icon}
@@ -1206,9 +1205,14 @@ export default function BrandDashboardHome() {
                 rows={appliedInfluencers}
                 onDecision={handleApplicantDecision}
                 decisionLoadingMap={applicantDecisionLoading}
-                onOpenInfluencer={(campaignId) =>
-                  router.push(`/brand/influ/applied?campaignId=${campaignId}`)
-                }
+                onOpenInfluencer={(campaignId: string, campaignDisplayTitle: string) => {
+                  const query = new URLSearchParams();
+
+                  query.set("campaignId", campaignId);
+                  query.set("campaignName", campaignDisplayTitle);
+
+                  router.push(`/brand/Influencer/applied?${query.toString()}`);
+                }}
               />
 
               <CampaignListSection
@@ -1218,7 +1222,7 @@ export default function BrandDashboardHome() {
               />
             </div>
             <div className="flex h-full w-full min-w-0 flex-col gap-6 xl:col-span-4">
-              <ReleaseMilestoneSection rows={releaseMilestones} />
+              {/* <ReleaseMilestoneSection rows={releaseMilestones} /> */}
 
               <DashboardInboxSection
                 rows={filteredInbox}
@@ -1391,7 +1395,7 @@ const AppliedInfluencerSection = ({
   rows: AppliedInfluencerRow[];
   onDecision: (row: AppliedInfluencerRow, field: ApplicantDecisionField) => void;
   decisionLoadingMap: Record<string, boolean>;
-  onOpenInfluencer: (campaignId: string) => void;
+  onOpenInfluencer: (campaignId: string, campaignDisplayTitle: string) => void;
 }) => {
   return (
     <section className="flex w-full min-w-0 rounded-lg border border-[#E6E6E6] bg-white px-5 pt-4 pb-3 pr-1">
@@ -1436,7 +1440,7 @@ const AppliedInfluencerItem = ({
 }: {
   row: AppliedInfluencerRow;
   onDecision: (row: AppliedInfluencerRow, field: ApplicantDecisionField) => void;
-  onOpenInfluencer: (campaignId: string) => void;
+  onOpenInfluencer: (campaignId: string, campaignDisplayTitle: string) => void;
   isDecisionLoading: boolean;
 }) => {
   const platformIcon = getPlatformIconSrc(row.primaryPlatform);
@@ -1445,11 +1449,11 @@ const AppliedInfluencerItem = ({
     <div
       role="button"
       tabIndex={0}
-      onClick={() => onOpenInfluencer(row.campaignId)}
+      onClick={() => onOpenInfluencer(row.campaignId, row.campaignName)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onOpenInfluencer(row.campaignId);
+          onOpenInfluencer(row.campaignId, row.campaignName);
         }
       }}
       className="grid w-full min-w-0 cursor-pointer grid-cols-1 gap-3 border-b border-[#E6E6E6] py-3 first:pt-0 transition hover:bg-[#F9F9F9] lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
@@ -1520,20 +1524,6 @@ const AppliedInfluencerItem = ({
           >
             <X size={24} weight="regular" />
           </button>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDecision(row, "isUndicided");
-            }}
-            disabled={isDecisionLoading}
-            className="flex w-10 items-center justify-center border border-[#D6D6D6] text-[#1A1A1A] disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Mark undecided"
-          >
-            <span className="font-inter text-[1.5rem] font-normal leading-none cursor-pointer">?</span>
-          </button>
-
           <button
             type="button"
             onClick={(e) => {
@@ -1552,74 +1542,74 @@ const AppliedInfluencerItem = ({
   );
 };
 
-const ReleaseMilestoneSection = ({ rows }: { rows: ReleaseMilestoneRow[] }) => {
-  return (
-    <section className="flex w-full min-w-0 rounded-lg border border-[#E6E6E6] bg-white pl-4 pr-0 pt-4">
-      <div className="flex w-full min-w-0 flex-col gap-6">
-        <h3 className="font-inter text-[1rem] font-medium leading-6 tracking-[0] text-[#1A1A1A]">
-          Release Milestone
-        </h3>
+// const ReleaseMilestoneSection = ({ rows }: { rows: ReleaseMilestoneRow[] }) => {
+//   return (
+//     <section className="flex w-full min-w-0 rounded-lg border border-[#E6E6E6] bg-white pl-4 pr-0 pt-4">
+//       <div className="flex w-full min-w-0 flex-col gap-6">
+//         <h3 className="font-inter text-[1rem] font-medium leading-6 tracking-[0] text-[#1A1A1A]">
+//           Release Milestone
+//         </h3>
 
-        <div className={`${dashboardScrollbarClass} max-h-[11.75rem] w-full !pr-0`}>
-          {!rows.length ? (
-            <div className="pb-4 font-inter text-[0.75rem] text-[#969696]">
-              No milestones to release.
-            </div>
-          ) : (
-            <div className="flex w-full flex-col">
-              {rows.map((row) => (
-                <div
-                  key={row.id}
-                  className="flex w-full flex-col items-start gap-3 border-b border-[#E6E6E6] pb-3 pr-3 [&:not(:first-child)]:pt-3"
-                >
-                  <div className="flex w-full min-w-0 items-start gap-2">
-                    <MilestoneImageBox src={row.imageUrl} title={row.title} />
+//         <div className={`${dashboardScrollbarClass} max-h-[11.75rem] w-full !pr-0`}>
+//           {!rows.length ? (
+//             <div className="pb-4 font-inter text-[0.75rem] text-[#969696]">
+//               No milestones to release.
+//             </div>
+//           ) : (
+//             <div className="flex w-full flex-col">
+//               {rows.map((row) => (
+//                 <div
+//                   key={row.id}
+//                   className="flex w-full flex-col items-start gap-3 border-b border-[#E6E6E6] pb-3 pr-3 [&:not(:first-child)]:pt-3"
+//                 >
+//                   <div className="flex w-full min-w-0 items-start gap-2">
+//                     <MilestoneImageBox src={row.imageUrl} title={row.title} />
 
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-inter text-[0.875rem] font-semibold leading-5 text-[#1A1A1A]">
-                        {row.title}
-                      </p>
+//                     <div className="min-w-0 flex-1">
+//                       <p className="truncate font-inter text-[0.875rem] font-semibold leading-5 text-[#1A1A1A]">
+//                         {row.title}
+//                       </p>
 
-                      <p className="line-clamp-1 font-inter text-[0.75rem] font-normal leading-4 text-[#B8B8B8]">
-                        {row.description}
-                      </p>
+//                       <p className="line-clamp-1 font-inter text-[0.75rem] font-normal leading-4 text-[#B8B8B8]">
+//                         {row.description}
+//                       </p>
 
-                      {(row.influencerName || row.amount) ? (
-                        <p className="mt-1 truncate font-inter text-[0.6875rem] font-normal leading-4 text-[#969696]">
-                          {row.influencerName ? row.influencerName : ""}
-                          {row.influencerName && row.amount ? " · " : ""}
-                          {row.amount
-                            ? `${row.currency || "USD"} ${Number(row.amount).toLocaleString()}`
-                            : ""}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
+//                       {(row.influencerName || row.amount) ? (
+//                         <p className="mt-1 truncate font-inter text-[0.6875rem] font-normal leading-4 text-[#969696]">
+//                           {row.influencerName ? row.influencerName : ""}
+//                           {row.influencerName && row.amount ? " · " : ""}
+//                           {row.amount
+//                             ? `${row.currency || "USD"} ${Number(row.amount).toLocaleString()}`
+//                             : ""}
+//                         </p>
+//                       ) : null}
+//                     </div>
+//                   </div>
 
-                  <div className="ml-[2.75rem] flex items-center gap-3">
-                    <button
-                      type="button"
-                      className="flex h-7 items-center justify-center rounded-lg border border-[#E6E6E6] bg-white px-4 font-inter text-[0.75rem] font-medium leading-4 text-[#1A1A1A]"
-                    >
-                      Reject
-                    </button>
+//                   {/* <div className="ml-[2.75rem] flex items-center gap-3">
+//                     <button
+//                       type="button"
+//                       className="flex h-7 items-center justify-center rounded-lg border border-[#E6E6E6] bg-white px-4 font-inter text-[0.75rem] font-medium leading-4 text-[#1A1A1A]"
+//                     >
+//                       Reject
+//                     </button>
 
-                    <button
-                      type="button"
-                      className="flex h-7 items-center justify-center rounded-lg bg-[#1A1A1A] px-4 font-inter text-[0.75rem] font-medium leading-4 text-white"
-                    >
-                      Release
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-};
+//                     <button
+//                       type="button"
+//                       className="flex h-7 items-center justify-center rounded-lg bg-[#1A1A1A] px-4 font-inter text-[0.75rem] font-medium leading-4 text-white"
+//                     >
+//                       Release
+//                     </button>
+//                   </div> */}
+//                 </div>
+//               ))}
+//             </div>
+//           )}
+//         </div>
+//       </div>
+//     </section>
+//   );
+// };
 
 const DashboardInboxSection = ({
   rows,
@@ -1645,7 +1635,7 @@ const DashboardInboxSection = ({
           <button
             type="button"
             onClick={onViewAll}
-            className="flex shrink-0 items-center gap-1 font-inter text-[0.75rem] font-medium leading-4 text-[#1A1A1A] underline underline-offset-2"
+            className="flex shrink-0 items-center gap-1 font-inter text-[0.75rem] font-medium leading-4 text-[#1A1A1A] underline underline-offset-2 cursor-pointer"
           >
             View all
             <ArrowUpRight size={14} weight="bold" />
@@ -1676,7 +1666,7 @@ const DashboardInboxSection = ({
                     key={row.threadId}
                     type="button"
                     onClick={() => onOpenThread(row.threadId)}
-                    className="flex w-full min-w-0 items-start gap-2 border-b border-[#E6E6E6] px-2 pt-2 pb-3 text-left transition hover:bg-[#F9F9F9]"
+                    className="flex w-full min-w-0 items-start gap-2 border-b border-[#E6E6E6] px-2 pt-2 pb-3 text-left transition hover:bg-[#F9F9F9] cursor-pointer"
                   >
                     <AvatarBox
                       src=""
@@ -1736,7 +1726,7 @@ const CampaignListSection = ({
           <button
             type="button"
             onClick={onViewAll}
-            className="font-inter text-[0.75rem] font-medium leading-4 text-[#1A1A1A] underline underline-offset-2 pr-2"
+            className="font-inter text-[0.75rem] font-medium leading-4 text-[#1A1A1A] underline underline-offset-2 pr-2 cursor-pointer"
           >
             View campaigns
           </button>
@@ -1761,7 +1751,7 @@ const CampaignListSection = ({
                       onOpenCampaign(campaign.id);
                     }
                   }}
-                  className="flex w-full min-w-0 cursor-pointer flex-col gap-3 border-b border-[#E6E6E6] py-3 text-left last:border-b-0 xl:flex-row xl:items-center xl:justify-between"
+                  className="flex w-full min-w-0 cursor-pointer flex-col gap-3 border-b border-[#E6E6E6] py-3 text-left last:border-b-0 xl:flex-row xl:items-center xl:justify-between hover:bg-[#F9F9F9]"
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-3">
                     <AvatarBox name={campaign.title} sizeClass="h-10 w-10" darkFallback />
@@ -1894,6 +1884,12 @@ const ActiveInfluencerAvatarStack = ({
 };
 
 const PaymentHistorySection = ({ rows }: { rows: PaymentHistoryRow[] }) => {
+  const router = useRouter();
+
+  const onViewAll = () => {
+    router.push("/brand/wallet/transaction");
+  };
+
   return (
     <section className="flex w-full rounded-lg border border-[#E6E6E6] bg-white px-5 pt-4 pb-3 pr-1">
       <div className="flex w-full min-w-0 flex-col gap-6">
@@ -1904,7 +1900,8 @@ const PaymentHistorySection = ({ rows }: { rows: PaymentHistoryRow[] }) => {
 
           <button
             type="button"
-            className="font-inter text-[0.75rem] font-medium leading-4 text-[#1A1A1A] underline underline-offset-2 pr-2"
+            onClick={onViewAll}
+            className="font-inter text-[0.75rem] font-medium leading-4 text-[#1A1A1A] underline underline-offset-2 pr-2 cursor-pointer"
           >
             View transactions
           </button>

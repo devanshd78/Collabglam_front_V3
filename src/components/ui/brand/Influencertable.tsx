@@ -354,31 +354,6 @@ export function ActionGroup({
 
       <button
         type="button"
-        disabled={disabledButtons.undecided}
-        className="flex h-full w-[3.3125rem] cursor-pointer items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-30"
-        style={{
-          borderTop: `1px solid ${b}`,
-          borderBottom: `1px solid ${b}`,
-          borderLeft: `1px solid ${b}`,
-          borderRadius: 0,
-        }}
-        onMouseEnter={(e) => {
-          if (!disabledButtons.undecided) {
-            e.currentTarget.style.background =
-              "var(--Light-Background-BrandSubtle, #FFF9E6)";
-          }
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "transparent";
-        }}
-        aria-label="Undecided"
-        onClick={disabledButtons.undecided ? undefined : onUndecided}
-      >
-        <QuestionMark size={18} weight="bold" />
-      </button>
-
-      <button
-        type="button"
         disabled={disabledButtons.select}
         className="flex h-full w-[3.3125rem] cursor-pointer items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-30"
         style={{

@@ -50,17 +50,7 @@ const DEFAULT_ITEMS: Testimonial[] = [
       "https://collaglam-campaign.s3.us-east-1.amazonaws.com/sihoo+logo.svg",
     rating: 4.5,
   },
-  {
-    id: "t2",
-    company: "Jackery",
-    name: "Gabriela",
-    role: "(Marketing Manager)",
-    quote:
-      "“A reliable platform for brands looking to build authentic creator partnerships. The workflow is smooth, transparent, and results-driven.”",
-    avatarSrc:
-      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/jackery.webp",
-    rating: 5,
-  },
+  
   {
     id: "t3",
     company: "DREAME",
@@ -83,18 +73,8 @@ const DEFAULT_ITEMS: Testimonial[] = [
       "https://collaglam-campaign.s3.us-east-1.amazonaws.com/anker.png",
     rating: 4.5,
   },
-  {
-    id: "t5",
-    company: "VTOMAN",
-    name: "Okan",
-    role: "(Business collaboration)",
-    quote:
-      "“One of the easiest platforms we've used for collaborations.”",
-    avatarSrc:
-      "https://collaglam-campaign.s3.us-east-1.amazonaws.com/votoman.png",
-    rating: 4.5,
-  },
   
+
 ];
 
 // Solid warm background
@@ -349,13 +329,13 @@ export function VggCardStack({
           )}
         >
           <div className="flex items-start justify-between gap-4">
-            <div className="h-[68px] w-[68px] sm:h-[78px] sm:w-[78px] lg:h-[86px] lg:w-[86px] shrink-0 rounded-full overflow-hidden ring-2 ring-white/50">
+            <div className="h-[68px] w-[68px] sm:h-[78px] sm:w-[78px] lg:h-[86px] lg:w-[86px] shrink-0 rounded-full overflow-hidden bg-white ring-2 ring-white/70 p-[6px]">
               <img
                 src={card.data.avatarSrc}
-                alt={`${card.data.name} testimonial avatar`}
+                alt={`${card.data.company} logo`}
                 width={118}
                 height={118}
-                className="h-full w-full object-cover"
+                className="h-full w-full object-contain"
                 loading="eager"
               />
             </div>

@@ -2207,7 +2207,14 @@ export default function ViewCampaignPage() {
                 <Metric
                   label="Selected Influencer"
                   value={selectedInfluencerDisplay}
-                  onClick={() => router.push(`/brand/influ/active?campaignId=${campaignId}`)}
+                  onClick={() => {
+                    const query = new URLSearchParams();
+
+                    query.set("campaignId", campaignId);
+                    query.set("campaignName", campaignDisplayTitle);
+
+                    router.push(`/brand/Influencer/active?${query.toString()}`);
+                  }}
                 />
                 <Metric label="Timeline" value={timelineText} />
                 <Metric label="Total Budget" value={budgetText} />

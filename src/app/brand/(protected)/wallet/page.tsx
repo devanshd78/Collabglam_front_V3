@@ -85,7 +85,7 @@ type ConfirmBrandWalletTopupResponse = ConfirmBrandWalletTopupData & {
 
 const summaryTabs: { key: SummaryTab; label: string }[] = [
     { key: "balance", label: "Balance" },
-    { key: "freeze", label: "Freeze" },
+    { key: "freeze", label: "Escrow" },
     { key: "transaction", label: "Transaction" },
 ];
 
@@ -630,7 +630,7 @@ export default function WalletPaymentPage() {
             <section className="mt-[1.75rem]">
                 <div className="mb-[1rem] flex items-center justify-between">
                     <h2 className="text-[1.25rem] font-semibold leading-[1.75rem] tracking-[0] text-[#1A1A1A]">
-                        Freeze Amount
+                        Escrow Amount
                     </h2>
                 </div>
 
@@ -646,10 +646,10 @@ export default function WalletPaymentPage() {
                                         Influencer ID
                                     </th>
                                     <th className="px-[1rem] py-[1rem] text-left text-[0.875rem] font-semibold leading-[1.25rem]">
-                                        Freeze Amount
+                                        Escrow Amount
                                     </th>
                                     <th className="px-[1rem] py-[1rem] text-left text-[0.875rem] font-semibold leading-[1.25rem]">
-                                        Current Frozen
+                                        Current Escrow
                                     </th>
                                     <th className="px-[1rem] py-[1rem] text-left text-[0.875rem] font-semibold leading-[1.25rem]">
                                         Allocated

@@ -53,6 +53,8 @@ export type ListCardProps = {
   secondaryText?: string;
   className?: string;
 
+  onClick?: () => void;
+
   disabled?: boolean;
   disabledTitle?: string;
   overlayLabel?: string;
@@ -226,6 +228,7 @@ export function ListCard({
   onMoreClick,
   secondaryText,
   className,
+  onClick,
   disabled = false,
   disabledTitle,
   overlayLabel,
@@ -285,11 +288,45 @@ export function ListCard({
     return categoryTag ? [categoryTag] : [];
   }, [badges, categoryTag]);
 
+  const isClickable = Boolean(onClick) && !disabled;
+
+  const isInnerInteractive = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false;
+
+    return Boolean(
+      target.closest(
+        "button,a,input,textarea,select,label,[role='button'],[data-no-card-click='true']"
+      )
+    );
+  };
+
+  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isClickable || isInnerInteractive(e.target)) return;
+    onClick?.();
+  };
+
+  const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isClickable) return;
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (isInnerInteractive(e.target)) return;
+
+    e.preventDefault();
+    onClick?.();
+  };
+
   return (
     <div
-      className={cx("relative", disabled ? "cursor-pointer" : "")}
+      className={cx(
+        "relative",
+        disabled ? "cursor-pointer" : "",
+        isClickable && "cursor-pointer"
+      )}
       title={disabled ? disabledTitle : undefined}
       aria-disabled={disabled || undefined}
+      role={isClickable ? "link" : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onClick={handleCardClick}
+      onKeyDown={handleCardKeyDown}
     >
       <div
         className={cx(

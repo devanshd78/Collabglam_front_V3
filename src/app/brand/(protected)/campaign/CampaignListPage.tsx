@@ -28,7 +28,6 @@ import ListCardView, {
   MetricIcons,
   type ListCardViewItem,
 } from "@/components/ui/brand/list";
-import { toast } from "@/components/ui/toast";
 import CampaignFilter, {
   DEFAULT_DATE_FILTER,
   type DateFilterValue,
@@ -357,6 +356,19 @@ function getCampaignEditHref(c: any, campaignId: string, campaignTitle?: string)
   }
 
   return `/brand/edit-campaign?campaignId=${encodedId}&campaignTitle=${encodedTitle}`;
+}
+function getManageInfluencerHref(campaignId: string) {
+  return `/brand/influ/all?campaignId=${encodeURIComponent(campaignId)}`;
+}
+
+function isCardInnerInteractive(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+
+  return Boolean(
+    target.closest(
+      "button,a,input,textarea,select,label,[role='button'],[data-no-card-click='true']"
+    )
+  );
 }
 
 function campaignFooterText(c: any) {
@@ -1006,7 +1018,7 @@ export default function CampaignListPage({
     const handleView = () => {
       if (locked) return;
       if (typeof window !== "undefined") {
-        window.location.href = viewHref;
+        window.location.href = getManageInfluencerHref(campaignId);
       }
     };
 
@@ -1015,6 +1027,27 @@ export default function CampaignListPage({
       if (typeof window !== "undefined") {
         window.location.href = getCampaignEditHref(c, campaignId, campaignTitle);
       }
+    };
+
+    const handleCardOpen = () => {
+      if (locked) return;
+      if (typeof window !== "undefined") {
+        window.location.href = viewHref;
+      }
+    };
+
+    const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+      if (locked || isCardInnerInteractive(e.target)) return;
+      handleCardOpen();
+    };
+
+    const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (locked) return;
+      if (e.key !== "Enter" && e.key !== " ") return;
+      if (isCardInnerInteractive(e.target)) return;
+
+      e.preventDefault();
+      handleCardOpen();
     };
 
     const edgeBadges = [
@@ -1037,94 +1070,103 @@ export default function CampaignListPage({
 
     return (
       <LockedShell key={campaignId} locked={locked} radiusClass="rounded-[1rem]">
-        <BrandCampaignCard
-          className="h-full min-w-0"
-          size="md"
-          logoUrl={imageUrls[0] || ""}
-          logoUrls={imageUrls}
-          logoAriaLabel="Product image"
-          name={c.campaignTitle}
-          statusLabel={statusLabel(c.status)}
-          statusVariant={statusToVariant(c.status)}
-          edgeBadges={edgeBadges}
-          headerRight={
-            locked ? null : (
-              <CampaignCardMenu
-                viewHref={viewHref}
-                inviteHref={inviteHref}
-                campaignStatus={c.status}
-                isDraft={c.isDraft}
-                isFullyManaged={fullyManaged}
-              />
-            )
-          }
-          tags={[c.category?.name || "No Category"]}
-          stats={[
-            {
-              label: "Platform",
-              value: platformCount,
-            },
-            {
-              label: "Budget",
-              value: `$${formatBudget(campaignBudget)}`,
-            },
-            {
-              label: "Applicants",
-              value: (
-                <button
-                  type="button"
-                  onClick={goToApplied}
-                  className="cursor-pointer text-primary hover:underline"
-                >
-                  {applicantCount}
-                </button>
-              ),
-            },
-            {
-              label: "Creators",
-              value: (
-                <button
-                  type="button"
-                  onClick={goToInfluencers}
-                  className="cursor-pointer text-primary hover:underline"
-                >
-                  {acceptedCount}/{totalInfluencers}
-                </button>
-              ),
-            },
-          ]}
-          footer={
-            <>
-              <div className="flex w-full items-center gap-2">
-                <Button
-                  variant="outline"
-                  className="flex-1 rounded-[0.75rem] border-border shadow-none"
-                  onClick={handleView}
-                  disabled={locked}
-                >
-                  View Campaign
-                </Button>
-
-                {showEditButton && !fullyManaged ? (
-                  <Button
+        <div
+          role="link"
+          tabIndex={locked ? -1 : 0}
+          onClick={handleCardClick}
+          onKeyDown={handleCardKeyDown}
+          className={locked ? "h-full min-w-0" : "h-full min-w-0 cursor-pointer"}
+          title={locked ? LOCK_TOOLTIP : `View ${campaignTitle}`}
+        >
+          <BrandCampaignCard
+            className="h-full min-w-0"
+            size="md"
+            logoUrl={imageUrls[0] || ""}
+            logoUrls={imageUrls}
+            logoAriaLabel="Product image"
+            name={c.campaignTitle}
+            statusLabel={statusLabel(c.status)}
+            statusVariant={statusToVariant(c.status)}
+            edgeBadges={edgeBadges}
+            headerRight={
+              locked ? null : (
+                <CampaignCardMenu
+                  viewHref={viewHref}
+                  inviteHref={inviteHref}
+                  campaignStatus={c.status}
+                  isDraft={c.isDraft}
+                  isFullyManaged={fullyManaged}
+                />
+              )
+            }
+            tags={[c.category?.name || "No Category"]}
+            stats={[
+              {
+                label: "Platform",
+                value: platformCount,
+              },
+              {
+                label: "Budget",
+                value: `$${formatBudget(campaignBudget)}`,
+              },
+              {
+                label: "Applicants",
+                value: (
+                  <button
                     type="button"
+                    onClick={goToApplied}
+                    className="cursor-pointer text-primary hover:underline"
+                  >
+                    {applicantCount}
+                  </button>
+                ),
+              },
+              {
+                label: "Creators",
+                value: (
+                  <button
+                    type="button"
+                    onClick={goToInfluencers}
+                    className="cursor-pointer text-primary hover:underline"
+                  >
+                    {acceptedCount}/{totalInfluencers}
+                  </button>
+                ),
+              },
+            ]}
+            footer={
+              <>
+                <div className="flex w-full items-center gap-2">
+                  <Button
                     variant="outline"
-                    className="h-[2.85rem] w-[2.65rem] rounded-[0.75rem] border-border px-0 shadow-none"
-                    onClick={handleEdit}
-                    aria-label="Edit campaign"
+                    className="flex-1 rounded-[0.75rem] border-border shadow-none"
+                    onClick={handleView}
                     disabled={locked}
                   >
-                    <PencilSimple size={18} weight="regular" />
+                    Manage Influencer
                   </Button>
-                ) : null}
-              </div>
 
-              <div className="text-xs text-muted-foreground">
-                {locked ? LOCK_TOOLTIP : footerText}
-              </div>
-            </>
-          }
-        />
+                  {showEditButton && !fullyManaged ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-[2.85rem] w-[2.65rem] rounded-[0.75rem] border-border px-0 shadow-none"
+                      onClick={handleEdit}
+                      aria-label="Edit campaign"
+                      disabled={locked}
+                    >
+                      <PencilSimple size={18} weight="regular" />
+                    </Button>
+                  ) : null}
+                </div>
+
+                <div className="text-xs text-muted-foreground">
+                  {locked ? LOCK_TOOLTIP : footerText}
+                </div>
+              </>
+            }
+          />
+        </div>
       </LockedShell>
     );
   };
@@ -1151,7 +1193,7 @@ export default function CampaignListPage({
       const handleView = () => {
         if (locked) return;
         if (typeof window !== "undefined") {
-          window.location.href = viewHref;
+          window.location.href = getManageInfluencerHref(campaignId);
         }
       };
 
@@ -1164,6 +1206,13 @@ export default function CampaignListPage({
 
       return {
         key: campaignId,
+        onClick: () => {
+          if (locked) return;
+          if (typeof window !== "undefined") {
+            window.location.href = viewHref;
+          }
+        },
+
         logoSrc: firstImage(c),
         logoImages: allImages(c),
         logoAlt: "Product image",
@@ -1211,7 +1260,7 @@ min-[981px]:w-auto"
             onClick={handleView}
             disabled={locked}
           >
-            View Campaign
+            Manage Influencer
           </Button>
         ),
         menuSlot: locked ? null : (
