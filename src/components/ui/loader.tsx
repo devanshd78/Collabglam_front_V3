@@ -79,12 +79,11 @@ export function Loader({
 
         {/* center logo */}
         <div className="absolute inset-0 flex items-center justify-center">
-          <Image
-            src={logoSrc}
+          <img
+            src="/logo.png"
             alt={logoAlt}
-            width={logoSize} // Next/Image expects px numbers
+            width={logoSize}
             height={logoSize}
-            priority
             className="select-none"
             draggable={false}
           />

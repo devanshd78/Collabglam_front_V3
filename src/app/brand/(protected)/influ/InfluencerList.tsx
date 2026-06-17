@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
   type MouseEvent as ReactMouseEvent,
+  type DragEvent as ReactDragEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -36,13 +37,14 @@ import {
 import {
   CaretDown,
   CircleNotch,
+  CloudArrowUp,
   EnvelopeOpen,
   FileArrowUp,
   FileText,
   PaperPlaneTilt,
   Signature,
 } from "@phosphor-icons/react";
-
+import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
 import {
   apiGetListByCampaign,
   apiGetCampaignInvitationsByCampaign,
@@ -179,6 +181,48 @@ const CONTRACT_STATUS = {
 
 const PAGE_LIMIT = 20;
 
+const OWN_CONTRACT_MAX_BYTES = 15 * 1024 * 1024;
+
+const COLLABGLAM_CAMPAIGN_ACKNOWLEDGEMENT_TITLE =
+  "COLLABGLAM CAMPAIGN ACKNOWLEDGEMENT";
+
+const COLLABGLAM_CAMPAIGN_ACKNOWLEDGEMENT_POINTS = [
+  "A separate campaign agreement, contract, statement of work, or order form has been reviewed and accepted by both Parties.",
+  "This collaboration was initiated through the CollabGlam Platform.",
+  "Campaign communications, deliverable submissions, approvals, milestone tracking, and payment activities will be managed through CollabGlam.",
+  "The Brand and Creator are solely responsible for the terms, obligations, and performance of their uploaded agreement.",
+  "CollabGlam acts only as the platform operator, workflow administrator, and payment facilitator, and is not a party to the uploaded agreement between the Brand and Creator.",
+  "For campaigns funded through CollabGlam Lane A, a 10% marketplace fee and applicable payment processing fees may be deducted from the Creator payout in accordance with platform terms, unless otherwise agreed in writing.",
+  "Platform records, messages, submissions, approvals, milestone activity, and payment records maintained by CollabGlam may be used as evidence of campaign activity and performance.",
+  "By accepting, each Party confirms that it has authority to enter into this collaboration and agrees to be bound by the uploaded agreement and this Acknowledgement.",
+];
+
+const COLLABGLAM_CAMPAIGN_ACKNOWLEDGEMENT_TEXT = [
+  COLLABGLAM_CAMPAIGN_ACKNOWLEDGEMENT_TITLE,
+  "",
+  "By accepting this Acknowledgement, the Brand and Creator confirm that:",
+  "",
+  ...COLLABGLAM_CAMPAIGN_ACKNOWLEDGEMENT_POINTS.map(
+    (point, index) => `${index + 1}. ${point}`
+  ),
+  "",
+  "Brand Acceptance",
+  "",
+  "I have reviewed and accept the uploaded agreement and this Acknowledgement.",
+  "",
+  "Creator Acceptance",
+  "",
+  "I have reviewed and accept the uploaded agreement and this Acknowledgement.",
+].join("\n");
+
+function formatOwnContractFileSize(size: number) {
+  if (!size) return "0 B";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+
 // ─── Payment type helpers ─────────────────────────────────────────────────────
 
 const normalizePaymentType = (raw?: string | null): PaymentType => {
@@ -292,12 +336,11 @@ function mapAcceptedAdminCreatedInfluencerToRow(a: any): InfluencerRow {
   const platform = normalizePlatformType(a?.platform);
   const platforms = platform
     ? [
-        {
-          platform,
-          followers: Number(a?.maxFollowers ?? a?.minFollowers ?? 0) || 0,
-          engagement: 0,
-        },
-      ]
+      {
+        platform,
+        followers: Number(a?.maxFollowers ?? a?.minFollowers ?? 0) || 0,
+      },
+    ]
     : [];
 
   return {
@@ -337,12 +380,11 @@ function mapCampaignInvitationToActiveRow(inv: any): InfluencerRow {
   const platform = normalizePlatformType(inv?.platform);
   const platforms = platform
     ? [
-        {
-          platform,
-          followers: Number(inv?.followers ?? inv?.audienceSize ?? 0) || 0,
-          engagement: 0,
-        },
-      ]
+      {
+        platform,
+        followers: Number(inv?.followers ?? inv?.audienceSize ?? 0) || 0,
+      },
+    ]
     : [];
 
   return {
@@ -417,9 +459,9 @@ function isRejectedMeta(meta?: ContractMeta | null) {
 function hasExistingContract(raw: any, meta?: ContractMeta | null) {
   return Boolean(
     meta?.contractId ||
-      raw?.contractId ||
-      raw?.contractMongoId ||
-      Number(raw?.isContracted) === 1
+    raw?.contractId ||
+    raw?.contractMongoId ||
+    Number(raw?.isContracted) === 1
   );
 }
 
@@ -596,7 +638,7 @@ function ActionButtons({
 
     const rect = button.getBoundingClientRect();
     const menuWidth = 224;
-    const menuHeight = 100;
+    const menuHeight = 104;
     const gap = 6;
 
     let left = rect.left;
@@ -664,62 +706,81 @@ function ActionButtons({
     onPrimary();
   };
 
+  const secondaryButton =
+    "inline-flex h-8 shrink-0 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]";
+
+  const blackButton =
+    "inline-flex h-8 shrink-0 items-center justify-center rounded-[0.5rem] bg-[#1A1A1A] px-4 text-[12px] font-medium text-white hover:opacity-90";
+
   const contractChoiceMenu =
     typeof document !== "undefined" && contractChoiceMode && menuOpen
       ? createPortal(
-          <div
-            ref={menuRef}
-            style={{ top: menuPosition.top, left: menuPosition.left }}
-            className="fixed z-[99999] w-56 overflow-hidden rounded-m border border-gray-200 bg-white shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+        <div
+          ref={menuRef}
+          style={{ top: menuPosition.top, left: menuPosition.left }}
+          className="fixed z-[99999] w-56 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setMenuOpen(false);
+              onUploadOwnContract?.();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-gray-800 hover:bg-gray-50"
           >
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setMenuOpen(false);
-                onUploadOwnContract?.();
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-gray-800 hover:bg-gray-50"
-            >
-              <FileArrowUp size={15} />
-              Upload Own Contract
-            </button>
+            <FileArrowUp size={15} />
+            Upload Own Contract
+          </button>
 
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setMenuOpen(false);
-                onUseTemplate?.();
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-gray-800 hover:bg-gray-50"
-            >
-              <FileText size={15} />
-              Use Template
-            </button>
-          </div>,
-          document.body
-        )
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setMenuOpen(false);
+              onUseTemplate?.();
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-medium text-gray-800 hover:bg-gray-50"
+          >
+            <FileText size={15} />
+            Use Template
+          </button>
+        </div>,
+        document.body
+      )
       : null;
 
   return (
-    <div className="flex min-w-max flex-nowrap items-center gap-2 whitespace-nowrap [&>button]:shrink-0">
+    <div className="flex w-max min-w-max flex-row items-center justify-end gap-2 whitespace-nowrap">
       <button
         ref={buttonRef}
         type="button"
         onClick={handlePrimaryClick}
-        className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]"
+        className={secondaryButton}
       >
         {primaryLabel}
-        {contractChoiceMode ? <CaretDown size={12} weight="bold" /> : null}
+        {contractChoiceMode ? (
+          <CaretDown size={12} weight="bold" className="ml-1" />
+        ) : null}
       </button>
 
       {contractChoiceMenu}
 
-      {showAccept && onAccept ? null : null}
+      {showViewContract && onViewContract ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onViewContract();
+          }}
+          className={secondaryButton}
+        >
+          {isViewContractLoading ? "Opening…" : "View Contract"}
+        </button>
+      ) : null}
 
       {showSign && onSign ? (
         <button
@@ -728,7 +789,7 @@ function ActionButtons({
             e.stopPropagation();
             onSign();
           }}
-          className="inline-flex h-8 items-center justify-center gap-1 rounded-[0.5rem] bg-[#1A1A1A] px-3 text-[12px] font-medium text-white hover:opacity-90"
+          className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-[0.5rem] bg-[#1A1A1A] px-3 text-[12px] font-medium text-white hover:opacity-90"
         >
           <Signature size={14} />
           Sign
@@ -741,23 +802,10 @@ function ActionButtons({
           e.stopPropagation();
           onManage();
         }}
-        className="inline-flex h-8 items-center justify-center rounded-[0.5rem] bg-[#1A1A1A] px-4 text-[12px] font-medium text-white hover:opacity-90"
+        className={blackButton}
       >
         Manage
       </button>
-
-      {showViewContract && onViewContract ? (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onViewContract();
-          }}
-          className="inline-flex h-8 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]"
-        >
-          {isViewContractLoading ? "Opening…" : "View Contract"}
-        </button>
-      ) : null}
 
       <button
         type="button"
@@ -766,7 +814,7 @@ function ActionButtons({
           onMail();
         }}
         aria-label="Open inbox"
-        className="relative flex h-8 w-8 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white hover:bg-[#F7F7F7]"
+        className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white hover:bg-[#F7F7F7]"
       >
         <EnvelopeOpen size={18} weight="regular" />
         <span
@@ -775,7 +823,7 @@ function ActionButtons({
         />
       </button>
 
-      {moreMenu}
+      {moreMenu ? <span className="shrink-0">{moreMenu}</span> : null}
     </div>
   );
 }
@@ -815,67 +863,67 @@ function ActiveMilestoneActions({
   showViewContract?: boolean;
   onViewContract?: () => void;
 }) {
+  const secondaryButton =
+    "inline-flex h-8 shrink-0 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]";
+
+  const blackButton =
+    "inline-flex h-8 shrink-0 items-center justify-center rounded-[0.5rem] bg-[#1A1A1A] px-4 text-[12px] font-medium text-white hover:opacity-90";
+
   return (
-    <div className="flex min-w-max flex-nowrap items-start gap-2 whitespace-nowrap [&>button]:shrink-0">
-      <div className="flex shrink-0 flex-col gap-2">
-        {isAdminCreatedCampaign ? (
-          <button
-            type="button"
-            onClick={onViewMilestone}
-            className="inline-flex h-8 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]"
-          >
-            View Milestone
-          </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={onAddMilestone}
-              className="inline-flex h-8 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]"
-            >
-              Add Milestone
-            </button>
+    <div className="flex w-max min-w-max flex-row items-center justify-end gap-2 whitespace-nowrap">
+      {isAdminCreatedCampaign ? (
+        <button
+          type="button"
+          onClick={onViewMilestone}
+          className={secondaryButton}
+        >
+          View Milestone
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={onAddMilestone}
+          className={secondaryButton}
+        >
+          Add Milestone
+        </button>
+      )}
 
-            {showViewMilestone ? (
-              <button
-                type="button"
-                onClick={onViewMilestone}
-                className="inline-flex h-8 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]"
-              >
-                View Milestone
-              </button>
-            ) : null}
-          </>
-        )}
+      {showViewMilestone && !isAdminCreatedCampaign ? (
+        <button
+          type="button"
+          onClick={onViewMilestone}
+          className={secondaryButton}
+        >
+          View Milestone
+        </button>
+      ) : null}
 
-        {showViewContract && onViewContract ? (
-          <button
-            type="button"
-            onClick={onViewContract}
-            className="inline-flex h-8 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#F7F7F7]"
-          >
-            View Contract
-          </button>
-        ) : null}
+      {showViewContract && onViewContract ? (
+        <button
+          type="button"
+          onClick={onViewContract}
+          className={secondaryButton}
+        >
+          View Contract
+        </button>
+      ) : null}
 
-        {showSendFeedback && onSendFeedback ? (
-          <button
-            type="button"
-            onClick={onSendFeedback}
-            className="inline-flex h-8 items-center justify-center rounded-[0.5rem] border border-[#BCE4C5] bg-[#EAF6EC] px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#DCF1E1]"
-          >
-            Send Feedback
-          </button>
-        ) : null}
-      </div>
-
-      {showAccept && onAccept ? null : null}
+      {showSendFeedback && onSendFeedback ? (
+        <button
+          type="button"
+          onClick={onSendFeedback}
+          className="inline-flex h-8 shrink-0 items-center justify-center rounded-[0.5rem] border border-[#BCE4C5] bg-[#EAF6EC] px-3 text-[12px] font-medium text-[#1A1A1A] hover:bg-[#DCF1E1]"
+        >
+          Send Feedback
+        </button>
+      ) : null}
 
       {showSign && onSign ? (
         <button
           type="button"
           onClick={onSign}
-          className="inline-flex h-8 items-center justify-center gap-1 rounded-[0.5rem] bg-[#1A1A1A] px-3 text-[12px] font-medium text-white hover:opacity-90"
+          className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-[0.5rem] bg-[#1A1A1A] px-3 text-[12px] font-medium text-white hover:opacity-90"
         >
           <Signature size={14} />
           Sign
@@ -885,7 +933,7 @@ function ActiveMilestoneActions({
       <button
         type="button"
         onClick={onManage}
-        className="inline-flex h-8 items-center justify-center rounded-[0.5rem] bg-[#1A1A1A] px-4 text-[12px] font-medium text-white hover:opacity-90"
+        className={blackButton}
       >
         Manage
       </button>
@@ -894,7 +942,7 @@ function ActiveMilestoneActions({
         type="button"
         onClick={onMail}
         aria-label="Open inbox"
-        className="relative flex h-8 w-8 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white hover:bg-[#F7F7F7]"
+        className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white hover:bg-[#F7F7F7]"
       >
         <EnvelopeOpen size={18} weight="regular" />
         <span
@@ -903,8 +951,387 @@ function ActiveMilestoneActions({
         />
       </button>
 
-      {moreMenu}
+      {moreMenu ? <span className="shrink-0">{moreMenu}</span> : null}
     </div>
+  );
+}
+
+
+// ─── OwnContractUploadDialog ──────────────────────────────────────────────────
+
+function OwnContractUploadDialog({
+  open,
+  targetName,
+  file,
+  accepted,
+  error,
+  isSubmitting,
+  onClose,
+  onFileSelected,
+  onClearFile,
+  onAcceptedChange,
+  onSubmit,
+}: {
+  open: boolean;
+  targetName?: string;
+  file: File | null;
+  accepted: boolean;
+  error?: string;
+  isSubmitting?: boolean;
+  onClose: () => void;
+  onFileSelected: (file: File | null) => void;
+  onClearFile: () => void;
+  onAcceptedChange: (value: boolean) => void;
+  onSubmit: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setIsDragging(false);
+      setShowTerms(false);
+    }
+  }, [open]);
+
+  const handleDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(false);
+
+    if (isSubmitting) return;
+    onFileSelected(event.dataTransfer.files?.[0] || null);
+  };
+
+  const dialogDate = useMemo(() => {
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    })
+      .format(new Date())
+      .replace(",", "");
+  }, [open]);
+
+  const hasReadyFile = Boolean(file);
+  const canSend = Boolean(file && accepted && !isSubmitting);
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && !isSubmitting) onClose();
+      }}
+    >
+      <DialogContent
+        className="!w-[min(52rem,calc(100vw-2rem))] !max-w-[min(52rem,calc(100vw-2rem))] overflow-hidden border-0 bg-transparent p-0 shadow-none"
+      >
+        <div
+          className="flex max-h-[90vh] flex-col overflow-hidden bg-white"
+          style={{
+            borderRadius: "var(--Border-Radius-L, 1rem)",
+            background: "var(--Light-Background-Primary, #FFF)",
+            boxShadow:
+              "0 24px 40px -4px rgba(0, 0, 0, 0.10), 0 0 12px 0 rgba(0, 0, 0, 0.08)",
+          }}
+        >
+          <div className="px-8 pt-8">
+            <div className="flex items-center justify-between gap-4">
+              <DialogHeader className="min-w-0 space-y-0 text-left">
+                <DialogTitle
+                  className="truncate"
+                  style={{
+                    overflow: "hidden",
+                    color: "var(--Light-Text-Primary, #1A1A1A)",
+                    textOverflow: "ellipsis",
+                    fontFamily: "var(--Font-Family-Inter, Inter)",
+                    fontSize: "var(--Font-Size-20, 1.25rem)",
+                    fontStyle: "normal",
+                    fontWeight: "var(--Font-Weight-Semi-Bold, 600)",
+                    lineHeight: "var(--Line-Height-28, 1.75rem)",
+                    letterSpacing: "var(--Letter-Spacing-0, 0)",
+                  }}
+                >
+                  Upload Contract
+                </DialogTitle>
+                <DialogDescription className="sr-only">
+                  Upload the Brand contract and accept the contractual terms.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="flex shrink-0 items-center gap-3">
+                <span
+                  style={{
+                    color: "var(--Light-Text-Tertiary, #B8B8B8)",
+                    textAlign: "center",
+                    fontFamily: "var(--Font-Family-Inter, Inter)",
+                    fontSize: "var(--Font-Size-16, 1rem)",
+                    fontStyle: "normal",
+                    fontWeight: "var(--Font-Weight-Medium, 500)",
+                    lineHeight: "var(--Line-Height-24, 1.5rem)",
+                    letterSpacing: "var(--Letter-Spacing-0, 0)",
+                  }}
+                >
+                  {dialogDate}
+                </span>
+
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={onClose}
+                  aria-label="Close upload contract dialog"
+                  className="flex h-6 w-6 items-center justify-center rounded-full text-xl leading-none text-[#1A1A1A] hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 h-px w-full bg-[#E5E5E5]" />
+          </div>
+
+          {!showTerms ? (
+            <div className="flex min-h-0 flex-1 flex-col px-8 pb-5 pt-6">
+              <div
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (!isSubmitting) setIsDragging(true);
+                }}
+                onDragLeave={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setIsDragging(false);
+                }}
+                onDrop={handleDrop}
+                onClick={() => {
+                  if (!isSubmitting) inputRef.current?.click();
+                }}
+                className={[
+                  "flex min-h-[13.5rem] cursor-pointer flex-col items-center justify-center px-8 py-10 text-center transition",
+                  isDragging ? "border-[#1A1A1A]" : "hover:border-[#BDBDBD]",
+                  isSubmitting ? "pointer-events-none opacity-70" : "",
+                ].join(" ")}
+                style={{
+                  borderRadius: "0.75rem",
+                  border: "1px solid var(--Neutrals-300, #D6D6D6)",
+                  background: "var(--Neutrals-50, #F9F9F9)",
+                }}
+              >
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  className="hidden"
+                  disabled={isSubmitting}
+                  onChange={(event) => {
+                    onFileSelected(event.target.files?.[0] || null);
+                    event.target.value = "";
+                  }}
+                />
+
+                <div
+                  className="flex h-8 w-8 items-center justify-center"
+                  style={{
+                    borderRadius: "3.75rem",
+                    background: "var(--Light-Background-Neutral, #E6E6E6)",
+                  }}
+                >
+                  <CloudArrowUp size={16} weight="bold" color="#969696" />
+                </div>
+
+                {file ? (
+                  <>
+                    <div className="mt-3 max-w-[21rem] truncate text-[0.875rem] font-semibold leading-5 text-[#1A1A1A]">
+                      {file.name}
+                    </div>
+                    <div className="mt-1 text-[0.75rem] leading-4 text-[#969696]">
+                      {formatOwnContractFileSize(file.size)}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onClearFile();
+                      }}
+                      className="mt-3 text-[0.75rem] font-semibold text-[#1A1A1A] underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Remove file
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="mt-3 text-[0.875rem] leading-5 text-[#B8B8B8]">
+                      <span className="font-semibold text-[#1A1A1A] underline underline-offset-2">
+                        Click to upload
+                      </span>{" "}
+                      or drag and drop
+                    </div>
+                    <div className="mt-1 text-[0.75rem] leading-4 text-[#B8B8B8]">
+                      PDF under {Math.round(OWN_CONTRACT_MAX_BYTES / (1024 * 1024))}mb
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {error ? (
+                <div className="mt-3 rounded-[0.5rem] border border-red-200 bg-red-50 px-3 py-2 text-[0.875rem] leading-5 text-red-700">
+                  {error}
+                </div>
+              ) : null}
+
+              <label className="mt-4 flex cursor-pointer items-start gap-2">
+                <Checkbox
+                  checked={accepted}
+                  disabled={!hasReadyFile || isSubmitting}
+                  onCheckedChange={(value) => {
+                    onAcceptedChange(value === true);
+                  }}
+                  onClick={() => {
+                    if (error) onAcceptedChange(accepted);
+                  }}
+                  aria-invalid={Boolean(error && error.toLowerCase().includes("accept"))}
+                  className={[
+                    "bg-background border rounded-[4px] w-[20px] h-[20px] p-[4px] mt-1 shrink-0 disabled:cursor-not-allowed disabled:opacity-40",
+                    error && error.toLowerCase().includes("accept")
+                      ? "border-[color:var(--Errors-500,#E35141)]"
+                      : "border-[color:var(--Border-Primary,#B3B3B3)]",
+                  ].join(" ")}
+                />
+
+                <span
+                  style={{
+                    color: "var(--Light-Text-Tertiary, #B8B8B8)",
+                    fontFamily: "Inter",
+                    fontSize: "0.875rem",
+                    fontStyle: "normal",
+                    fontWeight: 400,
+                    lineHeight: "1.25rem",
+                  }}
+                >
+                  By signing, I confirm that I have read and therefore agree to all{" "}
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setShowTerms(true);
+                    }}
+                    style={{
+                      color: "var(--Light-Text-Secondary, #969696)",
+                      fontFamily: "var(--Font-Family-Inter, Inter)",
+                      fontSize: "var(--Font-Size-16, 1rem)",
+                      fontStyle: "normal",
+                      fontWeight: "var(--Font-Weight-Medium, 500)",
+                      lineHeight: "var(--Line-Height-24, 1.5rem)",
+                      letterSpacing: "var(--Letter-Spacing-0, 0)",
+                      textDecorationLine: "underline",
+                      textDecorationStyle: "solid",
+                      textDecorationSkipInk: "none",
+                      textUnderlineOffset: "auto",
+                      textUnderlinePosition: "from-font",
+                    }}
+                  >
+                    contractual terms
+                  </button>
+                  , which become legally binding
+                </span>
+              </label>
+            </div>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col px-8 pb-5 pt-5">
+              <div className="min-h-[17.25rem] max-h-[17.25rem] overflow-y-auto pr-4 scrollbar-none scrollbar-hide">
+                <p
+                  style={{
+                    color: "var(--Light-Text-Secondary, #969696)",
+                    fontFamily: "var(--Font-Family-Inter, Inter)",
+                    fontSize: "var(--Font-Size-16, 1rem)",
+                    fontStyle: "normal",
+                    fontWeight: "var(--Font-Weight-Medium, 500)",
+                    lineHeight: "var(--Line-Height-24, 1.5rem)",
+                    letterSpacing: "var(--Letter-Spacing-0, 0)",
+                  }}
+                >
+                  By accepting this Acknowledgement, the Brand and Creator confirm that:
+                </p>
+
+                <ol className="mt-5 space-y-4">
+                  {COLLABGLAM_CAMPAIGN_ACKNOWLEDGEMENT_POINTS.map((point, index) => (
+                    <li
+                      key={point}
+                      style={{
+                        color: "var(--Light-Text-Secondary, #969696)",
+                        fontFamily: "var(--Font-Family-Inter, Inter)",
+                        fontSize: "var(--Font-Size-16, 1rem)",
+                        fontStyle: "normal",
+                        fontWeight: "var(--Font-Weight-Medium, 500)",
+                        lineHeight: "var(--Line-Height-24, 1.5rem)",
+                        letterSpacing: "var(--Letter-Spacing-0, 0)",
+                      }}
+                    >
+                      {index + 1}. {point}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-auto border-t border-[#F1F1F1] bg-white px-8 py-5">
+            <div className="flex items-center justify-between gap-5">
+              {showTerms ? (
+                <button
+                  type="button"
+                  onClick={() => setShowTerms(false)}
+                  className="h-10 rounded-[0.5rem] border border-[#D6D6D6] bg-white px-4 text-[0.875rem] font-semibold text-[#1A1A1A] hover:bg-[#F9F9F9]"
+                >
+                  Back to upload
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex items-center justify-end gap-5">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={onClose}
+                  className="h-10 rounded-[0.5rem] px-3 text-[0.875rem] font-semibold text-[#1A1A1A] hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!canSend}
+                  onClick={onSubmit}
+                  className="flex h-10 min-w-[5.75rem] items-center justify-center rounded-[0.5rem] bg-[#1A1A1A] px-5 text-[0.875rem] font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <CircleNotch
+                        size={14}
+                        weight="bold"
+                        className="mr-2 animate-spin"
+                      />
+                      Uploading
+                    </>
+                  ) : (
+                    "Submit"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1149,8 +1576,11 @@ export default function InfluencerList() {
   const [signOpen, setSignOpen] = useState(false);
   const [signTargetMeta, setSignTargetMeta] = useState<ContractMeta | null>(null);
   const [viewingPdfForId, setViewingPdfForId] = useState<string | null>(null);
-  const ownContractInputRef = useRef<HTMLInputElement | null>(null);
+  const [ownContractDialogOpen, setOwnContractDialogOpen] = useState(false);
   const [ownContractTargetRow, setOwnContractTargetRow] = useState<InfluencerRow | null>(null);
+  const [ownContractFile, setOwnContractFile] = useState<File | null>(null);
+  const [ownContractAcknowledged, setOwnContractAcknowledged] = useState(false);
+  const [ownContractError, setOwnContractError] = useState("");
   const [uploadingContractForId, setUploadingContractForId] = useState<string | null>(null);
 
   const [milestoneCreatedMap, setMilestoneCreatedMap] = useState<Record<string, boolean>>({});
@@ -1909,117 +2339,172 @@ export default function InfluencerList() {
     [contractMetaMap, openSinglePayoutTypeDialog, openContractSidebar]
   );
 
+  const resetOwnContractDialog = useCallback(() => {
+    setOwnContractDialogOpen(false);
+    setOwnContractTargetRow(null);
+    setOwnContractFile(null);
+    setOwnContractAcknowledged(false);
+    setOwnContractError("");
+  }, []);
+
   const openOwnContractPicker = useCallback(
     (row: InfluencerRow) => {
       if (!brandId || !campaignId) {
         toast({ icon: "error", title: "Missing details", text: "Brand or campaign id is missing." });
         return;
       }
+
       setOwnContractTargetRow(row);
-      requestAnimationFrame(() => ownContractInputRef.current?.click());
+      setOwnContractFile(null);
+      setOwnContractAcknowledged(false);
+      setOwnContractError("");
+      setOwnContractDialogOpen(true);
     },
     [brandId, campaignId]
   );
 
-  const handleOwnContractFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0] || null;
-      e.target.value = "";
+  const handleOwnContractDialogFile = useCallback((file: File | null) => {
+    setOwnContractError("");
 
-      const row = ownContractTargetRow;
-      setOwnContractTargetRow(null);
-      if (!file || !row) return;
+    if (!file) return;
 
-      const raw = (row as any)?.__raw ?? {};
-      const influencerId = getRawInfluencerId(raw, row.id);
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 
-      if (!brandId || !campaignId || !influencerId) {
-        toast({ icon: "error", title: "Missing details", text: "Brand, campaign, or influencer id is missing." });
-        return;
+    if (!isPdf) {
+      setOwnContractFile(null);
+      setOwnContractAcknowledged(false);
+      setOwnContractError("Please upload a PDF contract.");
+      return;
+    }
+
+    if (file.size > OWN_CONTRACT_MAX_BYTES) {
+      setOwnContractFile(null);
+      setOwnContractAcknowledged(false);
+      setOwnContractError(`Contract PDF must be ${Math.round(OWN_CONTRACT_MAX_BYTES / (1024 * 1024))} MB or less.`);
+      return;
+    }
+
+    setOwnContractFile(file);
+    setOwnContractAcknowledged(false);
+  }, []);
+
+  const handleSendUploadedOwnContract = useCallback(async () => {
+    const row = ownContractTargetRow;
+    const file = ownContractFile;
+
+    if (!row || !file) {
+      setOwnContractError("Please upload a PDF contract first.");
+      return;
+    }
+
+    if (!ownContractAcknowledged) {
+      setOwnContractError("Please accept the CollabGlam Campaign Acknowledgement before sending.");
+      return;
+    }
+
+    const raw = (row as any)?.__raw ?? {};
+    const influencerId = getRawInfluencerId(raw, row.id);
+
+    if (!brandId || !campaignId || !influencerId) {
+      setOwnContractError("Brand, campaign, or influencer id is missing.");
+      return;
+    }
+
+    const meta = contractMetaMap[row.id] ?? null;
+    const isResend = Boolean(meta?.contractId && isRejectedMeta(meta));
+
+    try {
+      setOwnContractError("");
+      setUploadingContractForId(row.id);
+
+      const uploadUrlRes: any = await api.post("/contract/own/upload-url", {
+        brandId,
+        campaignId,
+        influencerId,
+        fileName: file.name,
+        contentType: "application/pdf",
+        sizeBytes: file.size,
+      });
+
+      const upload = uploadUrlRes?.data?.upload || uploadUrlRes?.upload;
+
+      if (!upload?.uploadUrl || !upload?.key) {
+        throw new Error("Upload URL was not returned.");
       }
 
-      const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-      if (!isPdf) {
-        toast({ icon: "error", title: "Invalid file", text: "Please upload a PDF contract." });
-        return;
+      const s3Res = await fetch(upload.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: file,
+      });
+
+      if (!s3Res.ok) {
+        throw new Error("S3 upload failed.");
       }
 
-      if (file.size > 15 * 1024 * 1024) {
-        toast({ icon: "error", title: "File too large", text: "Contract PDF must be 15 MB or less." });
-        return;
-      }
-
-      const meta = contractMetaMap[row.id] ?? null;
-      const isResend = Boolean(meta?.contractId && isRejectedMeta(meta));
-      const ok = await askConfirm(
-        isResend ? "Resend uploaded contract?" : "Upload own contract?",
-        `This will upload "${file.name}" to S3 and send it to the influencer.`
-      );
-      if (!ok) return;
-
-      try {
-        setUploadingContractForId(row.id);
-        const uploadUrlRes: any = await api.post("/contract/own/upload-url", {
-          brandId,
-          campaignId,
-          influencerId,
-          fileName: file.name,
-          contentType: "application/pdf",
+      const sendRes: any = await api.post("/contract/own/send-uploaded", {
+        brandId,
+        campaignId,
+        influencerId,
+        isResend,
+        resendOf: isResend ? meta?.contractId : "",
+        brandAcknowledgementAccepted: true,
+        acknowledgementText: COLLABGLAM_CAMPAIGN_ACKNOWLEDGEMENT_TEXT,
+        uploadedContract: {
+          key: upload.key,
+          bucket: upload.bucket,
+          folder: upload.folder,
+          originalName: upload.originalName || file.name,
+          mimeType: "application/pdf",
           sizeBytes: file.size,
-        });
+        },
+      });
 
-        const upload = uploadUrlRes?.data?.upload || uploadUrlRes?.upload;
-        if (!upload?.uploadUrl || !upload?.key) throw new Error("Upload URL was not returned.");
+      const payload = sendRes?.data || sendRes || {};
+      const uploadedContract = payload.contract || null;
 
-        const s3Res = await fetch(upload.uploadUrl, {
-          method: "PUT",
-          headers: { "Content-Type": "application/pdf" },
-          body: file,
-        });
-        if (!s3Res.ok) throw new Error("S3 upload failed.");
-
-        const sendRes: any = await api.post("/contract/own/send-uploaded", {
-          brandId,
-          campaignId,
-          influencerId,
-          isResend,
-          resendOf: isResend ? meta?.contractId : "",
-          uploadedContract: {
-            key: upload.key,
-            bucket: upload.bucket,
-            folder: upload.folder,
-            originalName: upload.originalName || file.name,
-            mimeType: "application/pdf",
-            sizeBytes: file.size,
-          },
-        });
-
-        const payload = sendRes?.data || sendRes || {};
-        const uploadedContract = payload.contract || null;
-
-        if (uploadedContract?.contractId) {
-          setContractMetaMap((prev) => ({ ...prev, [row.id]: uploadedContract }));
-        }
-
-        toast({
-          icon: "success",
-          title: isResend ? "Contract resent" : "Contract uploaded",
-          text: "Own contract has been sent to the influencer.",
-        });
-
-        await fetchApplicants();
-      } catch (err: any) {
-        toast({
-          icon: "error",
-          title: "Upload failed",
-          text: err?.response?.data?.message || err?.message || "Could not upload own contract.",
-        });
-      } finally {
-        setUploadingContractForId(null);
+      if (uploadedContract?.contractId) {
+        setContractMetaMap((prev) => ({ ...prev, [row.id]: uploadedContract }));
       }
-    },
-    [ownContractTargetRow, brandId, campaignId, contractMetaMap, fetchApplicants, getRawInfluencerId]
-  );
+
+      toast({
+        icon: "success",
+        title: isResend ? "Contract resent" : "Contract uploaded",
+        text: "Own contract and CollabGlam acknowledgement have been sent to the influencer.",
+      });
+
+      resetOwnContractDialog();
+      await fetchApplicants();
+    } catch (err: any) {
+      setOwnContractError(
+        err?.response?.data?.message ||
+        err?.message ||
+        "Could not upload own contract."
+      );
+
+      toast({
+        icon: "error",
+        title: "Upload failed",
+        text:
+          err?.response?.data?.message ||
+          err?.message ||
+          "Could not upload own contract.",
+      });
+    } finally {
+      setUploadingContractForId(null);
+    }
+  }, [
+    ownContractTargetRow,
+    ownContractFile,
+    ownContractAcknowledged,
+    brandId,
+    campaignId,
+    contractMetaMap,
+    fetchApplicants,
+    getRawInfluencerId,
+    resetOwnContractDialog,
+  ]);
+
 
   const handleManage = useCallback(
     async (row: InfluencerRow) => {
@@ -2032,11 +2517,11 @@ export default function InfluencerList() {
 
       let contractId = String(
         contractMetaMap[row.id]?.contractId ||
-          contractMetaMap[row.id]?._id ||
-          raw?.contractId ||
-          raw?.contract?._id ||
-          raw?.contract?.contractId ||
-          ""
+        contractMetaMap[row.id]?._id ||
+        raw?.contractId ||
+        raw?.contract?._id ||
+        raw?.contract?.contractId ||
+        ""
       ).trim();
 
       if (!contractId && raw?.influencerId && brandId && campaignId) {
@@ -2366,12 +2851,25 @@ export default function InfluencerList() {
 
   return (
     <>
-      <input
-        ref={ownContractInputRef}
-        type="file"
-        accept="application/pdf,.pdf"
-        className="hidden"
-        onChange={handleOwnContractFileChange}
+      <OwnContractUploadDialog
+        open={ownContractDialogOpen}
+        targetName={ownContractTargetRow?.profile?.name || "this creator"}
+        file={ownContractFile}
+        accepted={ownContractAcknowledged}
+        error={ownContractError}
+        isSubmitting={Boolean(uploadingContractForId)}
+        onClose={resetOwnContractDialog}
+        onFileSelected={handleOwnContractDialogFile}
+        onClearFile={() => {
+          setOwnContractFile(null);
+          setOwnContractAcknowledged(false);
+          setOwnContractError("");
+        }}
+        onAcceptedChange={(value) => {
+          setOwnContractAcknowledged(value);
+          if (value) setOwnContractError("");
+        }}
+        onSubmit={handleSendUploadedOwnContract}
       />
 
       <InfluencerFilter
@@ -2391,128 +2889,128 @@ export default function InfluencerList() {
           ) : err ? (
             <div className="p-6 text-sm text-red-600">{err}</div>
           ) : (
-            <div className="w-full overflow-x-auto overflow-y-visible">
-              <div className="min-w-[78rem]">
-                <InfluencerTable
-                  rows={visibleRows}
-                  variant={tableVariant}
-                  onActionClick={handleApplicantDecision}
-                  selectable
-                  selectedIds={selectedBulkIds}
-                  onToggleRow={toggleBulkRow}
-                  onToggleAll={toggleBulkAllVisible}
-                  onClearSelection={clearBulkSelection}
-                  isRowSelectable={(row) => isBulkSelectable(row as InfluencerRow)}
-                  renderBulkHeader={({ selectedIds, clearSelection }) => (
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-[#F2F2F2] px-8 py-3">
-                      <div className="text-sm font-medium text-gray-800">
-                        {selectedIds.length} influencer{selectedIds.length > 1 ? "s" : ""} selected
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button variant="outline" onClick={clearSelection}>Clear</Button>
-                        <Button onClick={openBulkPayoutTypeDialog}>
-                          <PaperPlaneTilt className="mr-2 h-4 w-4" />
-                          Bulk Send Contract
-                        </Button>
-                      </div>
+            <div className="w-full overflow-visible">
+              <InfluencerTable
+                rows={visibleRows}
+                variant={tableVariant}
+                onActionClick={handleApplicantDecision}
+                selectable
+                selectedIds={selectedBulkIds}
+                onToggleRow={toggleBulkRow}
+                onToggleAll={toggleBulkAllVisible}
+                onClearSelection={clearBulkSelection}
+                isRowSelectable={(row) => isBulkSelectable(row as InfluencerRow)}
+                renderBulkHeader={({ selectedIds, clearSelection }) => (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-[#F2F2F2] px-8 py-3">
+                    <div className="text-sm font-medium text-gray-800">
+                      {selectedIds.length} influencer{selectedIds.length > 1 ? "s" : ""} selected
                     </div>
-                  )}
-                  renderDefaultActions={renderAllTabActions}
-                  renderShortlistedActions={(row) => {
-                    const meta = contractMetaMap[row.id] ?? null;
-                    const raw = (row as any)?.__raw ?? {};
-                    const statusStr = String(meta?.status || "");
-                    const showAccept = needsBrandAcceptance(statusStr);
-                    const showSign = canSignNow(meta);
-                    const isLoading = viewingPdfForId === row.id || openingContractForId === row.id;
-                    const { label: primaryLabel, viewOnly } = getPrimaryAction(raw, meta);
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" onClick={clearSelection}>Clear</Button>
+                      <Button onClick={openBulkPayoutTypeDialog}>
+                        <PaperPlaneTilt className="mr-2 h-4 w-4" />
+                        Bulk Send Contract
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                renderDefaultActions={renderAllTabActions}
+                renderShortlistedActions={(row) => {
+                  const meta = contractMetaMap[row.id] ?? null;
+                  const raw = (row as any)?.__raw ?? {};
+                  const statusStr = String(meta?.status || "");
+                  const showAccept = needsBrandAcceptance(statusStr);
+                  const showSign = canSignNow(meta);
+                  const isLoading = viewingPdfForId === row.id || openingContractForId === row.id;
+                  const { label: primaryLabel, viewOnly } = getPrimaryAction(raw, meta);
 
-                    return (
-                      <ActionButtons
-                        primaryLabel={
-                          uploadingContractForId === row.id
-                            ? "Uploading…"
-                            : isLoading && viewOnly
-                              ? "Opening…"
-                              : primaryLabel
-                        }
-                        contractChoiceMode={!viewOnly && (primaryLabel === "Send Contract" || primaryLabel === "Resend Contract")}
-                        onUseTemplate={() => handleUseTemplateContract(row)}
-                        onUploadOwnContract={() => openOwnContractPicker(row)}
-                        onPrimary={() => (viewOnly ? handleViewContractPdf(row) : openContractSidebar(row))}
-                        onManage={() => handleManage(row)}
-                        onMail={() => handleMail(row)}
-                        moreMenu={
-                          <InfluencerContextMenu
-                            type="shortlisted"
-                            onViewProfile={() => handleManage(row)}
-                            onCopyProfileLink={() => console.log("copy profile link", row.id)}
-                            onSaveToHub={(hubId) => console.log("save to hub", row.id, hubId)}
-                            onMoveToWorkspace={(workspaceId) => console.log("move to workspace", row.id, workspaceId)}
-                            onCompare={() => console.log("compare", row.id)}
-                            onDelete={() => console.log("remove", row.id)}
-                          />
-                        }
-                        showAccept={showAccept}
-                        onAccept={() => handleBrandAccept(row)}
-                        showSign={showSign}
-                        onSign={() => openSignModal(meta)}
-                        showViewContract={!viewOnly && hasExistingContract(raw, meta)}
-                        onViewContract={() => handleViewContractPdf(row)}
-                        isViewContractLoading={viewingPdfForId === row.id}
-                      />
-                    );
-                  }}
-                  renderActiveActions={(row) => {
-                    const meta = contractMetaMap[row.id] ?? null;
-                    const statusStr = String(meta?.status || "");
-                    const showAccept = needsBrandAcceptance(statusStr);
-                    const showSign = canSignNow(meta);
-                    const showViewMilestone = isAdminCreatedCampaign || milestoneCreatedMap[row.id] || hasMilestonesCreated(meta);
+                  return (
+                    <ActionButtons
+                      primaryLabel={
+                        uploadingContractForId === row.id
+                          ? "Uploading…"
+                          : isLoading && viewOnly
+                            ? "Opening…"
+                            : primaryLabel
+                      }
+                      contractChoiceMode={!viewOnly && (primaryLabel === "Send Contract" || primaryLabel === "Resend Contract")}
+                      onUseTemplate={() => handleUseTemplateContract(row)}
+                      onUploadOwnContract={() => openOwnContractPicker(row)}
+                      onPrimary={() => (viewOnly ? handleViewContractPdf(row) : openContractSidebar(row))}
+                      onManage={() => handleManage(row)}
+                      onMail={() => handleMail(row)}
+                      moreMenu={
+                        <InfluencerContextMenu
+                          type="shortlisted"
+                          onViewProfile={() => handleManage(row)}
+                          onCopyProfileLink={() => console.log("copy profile link", row.id)}
+                          onSaveToHub={(hubId) => console.log("save to hub", row.id, hubId)}
+                          onMoveToWorkspace={(workspaceId) => console.log("move to workspace", row.id, workspaceId)}
+                          onCompare={() => console.log("compare", row.id)}
+                          onDelete={() => console.log("remove", row.id)}
+                        />
+                      }
+                      showAccept={showAccept}
+                      onAccept={() => handleBrandAccept(row)}
+                      showSign={showSign}
+                      onSign={() => openSignModal(meta)}
+                      showViewContract={!viewOnly && hasExistingContract(raw, meta)}
+                      onViewContract={() => handleViewContractPdf(row)}
+                      isViewContractLoading={viewingPdfForId === row.id}
+                    />
+                  );
+                }}
+                renderActiveActions={(row) => {
+                  const meta = contractMetaMap[row.id] ?? null;
+                  const statusStr = String(meta?.status || "");
+                  const showAccept = needsBrandAcceptance(statusStr);
+                  const showSign = canSignNow(meta);
+                  const showViewMilestone = isAdminCreatedCampaign || milestoneCreatedMap[row.id] || hasMilestonesCreated(meta);
 
-                    return (
-                      <ActiveMilestoneActions
-                        onAddMilestone={() => handleOpenMilestoneModal(row)}
-                        showViewMilestone={showViewMilestone}
-                        onViewMilestone={() => handleViewMilestone(row)}
-                        showSendFeedback={campaignFeedbackPromptMap[row.id] === true}
-                        onSendFeedback={() => openCampaignFeedbackModal(row)}
-                        onManage={() => handleManage(row)}
-                        onMail={() => handleMail(row)}
-                        isAdminCreatedCampaign={isAdminCreatedCampaign}
-                        moreMenu={
-                          <InfluencerContextMenu
-                            type="active"
-                            onViewProfile={() => handleManage(row)}
-                            onCopyProfileLink={() => console.log("copy profile link", row.id)}
-                            onAddMilestone={() => handleOpenMilestoneModal(row)}
-                            onAssignDeliverables={() => console.log("assign deliverables", row.id)}
-                            onSaveToHub={(hubId) => console.log("save to hub", row.id, hubId)}
-                            onMoveToWorkspace={(workspaceId) => console.log("move to workspace", row.id, workspaceId)}
-                            onRaiseDispute={() => console.log("raise dispute", row.id)}
-                            onDelete={() => console.log("remove", row.id)}
-                          />
-                        }
-                        showAccept={isAdminCreatedCampaign ? false : showAccept}
-                        onAccept={() => openContractSidebar(row)}
-                        showSign={isAdminCreatedCampaign ? false : showSign}
-                        onSign={() => openSignModal(meta)}
-                      />
-                    );
-                  }}
-                  renderStatus={(row) => {
-                    const raw = (row as any)?.__raw ?? {};
-                    const meta = contractMetaMap[row.id] ?? null;
-                    return (
-                      <div className="flex min-h-[1.75rem] items-center justify-center rounded-[1.25rem] px-3 bg-[#F9F9F9]">
-                        <span className="whitespace-nowrap text-[0.875rem] font-semibold text-[#1A1A1A]">
-                          {getProfessionalContractStatusMessage(raw, meta)}
-                        </span>
-                      </div>
-                    );
-                  }}
-                />
-              </div>
+                  return (
+                    <ActiveMilestoneActions
+                      onAddMilestone={() => handleOpenMilestoneModal(row)}
+                      showViewMilestone={showViewMilestone}
+                      onViewMilestone={() => handleViewMilestone(row)}
+                      showSendFeedback={campaignFeedbackPromptMap[row.id] === true}
+                      onSendFeedback={() => openCampaignFeedbackModal(row)}
+                      onManage={() => handleManage(row)}
+                      onMail={() => handleMail(row)}
+                      isAdminCreatedCampaign={isAdminCreatedCampaign}
+                      moreMenu={
+                        <InfluencerContextMenu
+                          type="active"
+                          onViewProfile={() => handleManage(row)}
+                          onCopyProfileLink={() => console.log("copy profile link", row.id)}
+                          onAddMilestone={() => handleOpenMilestoneModal(row)}
+                          onAssignDeliverables={() => console.log("assign deliverables", row.id)}
+                          onSaveToHub={(hubId) => console.log("save to hub", row.id, hubId)}
+                          onMoveToWorkspace={(workspaceId) => console.log("move to workspace", row.id, workspaceId)}
+                          onRaiseDispute={() => console.log("raise dispute", row.id)}
+                          onDelete={() => console.log("remove", row.id)}
+                        />
+                      }
+                      showAccept={isAdminCreatedCampaign ? false : showAccept}
+                      onAccept={() => openContractSidebar(row)}
+                      showSign={isAdminCreatedCampaign ? false : showSign}
+                      onSign={() => openSignModal(meta)}
+                      showViewContract={hasExistingContract((row as any)?.__raw ?? {}, meta)}
+                      onViewContract={() => handleViewContractPdf(row)}
+                    />
+                  );
+                }}
+                renderStatus={(row) => {
+                  const raw = (row as any)?.__raw ?? {};
+                  const meta = contractMetaMap[row.id] ?? null;
+                  return (
+                    <div className="flex min-h-[1.75rem] items-center justify-center rounded-[1.25rem] px-3 bg-[#F9F9F9]">
+                      <span className="whitespace-nowrap text-[0.875rem] font-semibold text-[#1A1A1A]">
+                        {getProfessionalContractStatusMessage(raw, meta)}
+                      </span>
+                    </div>
+                  );
+                }}
+              />
             </div>
           )}
 
