@@ -33,10 +33,8 @@ import {
     idsOf,
     isValidDateRange,
     LAYOUT,
-    MANUAL_PLATFORM_OPTIONS,
     Option,
     pickCampaignId,
-    platformToUi,
     safeDateInput,
     SEARCHABLE_UI,
     useSearchProps,
@@ -272,8 +270,6 @@ type ManualForm = {
     campaignBudget: number;
     startDate: string;
     endDate: string;
-
-    platforms: string[];
     targetCountry: string[];
     targetAgeGroups: string[];
 
@@ -306,8 +302,6 @@ const EMPTY_MANUAL: ManualForm = {
     campaignBudget: 0,
     startDate: "",
     endDate: "",
-
-    platforms: [],
     targetCountry: [],
     targetAgeGroups: [],
 
@@ -498,7 +492,6 @@ function validateManualForm(args: {
 
     if (!form.subcategories?.length) e.subcategories = "Select at least 1 subcategory.";
     if (!form.goals?.length) e.goals = "Select at least 1 campaign goal.";
-    if (!form.platforms?.length) e.platforms = "Select at least 1 platform.";
     if (!form.targetCountry?.length) e.targetCountry = "Select at least 1 country.";
     if (!form.targetAgeGroups?.length) e.targetAgeGroups = "Select at least 1 age group.";
 
@@ -839,9 +832,6 @@ export default function EditCampaignPage() {
                 campaignBudget: Number(doc?.campaignBudget ?? 0),
                 startDate: safeDateInput(doc?.startAt ?? doc?.startDate),
                 endDate: safeDateInput(doc?.endAt ?? doc?.endDate),
-                platforms: (Array.isArray(doc?.platformSelection) ? doc.platformSelection : [])
-                    .map(platformToUi)
-                    .filter(Boolean),
                 targetCountry: idsOf(doc?.targetCountryIds ?? details?.targetCountries),
                 targetAgeGroups: idsOf(doc?.targetAgeRanges ?? details?.targetAgeRanges),
                 additionalNotes: String(doc?.additionalNotes ?? ""),
@@ -1144,7 +1134,6 @@ export default function EditCampaignPage() {
             form.numberOfInfluencers > 0,
             form.influencerTier.length > 0,
             form.contentFormats.length > 0,
-            form.platforms.length > 0,
             form.targetCountry.length > 0,
             form.targetAgeGroups.length > 0,
             form.paymentType.trim().length > 0,
@@ -1236,7 +1225,12 @@ export default function EditCampaignPage() {
             existingProductImagesCount: existingProductImages.length,
         });
 
-        if (Object.values(errs).some(Boolean)) return;
+        const firstError = Object.values(errs).find(Boolean);
+
+        if (firstError) {
+            toastError("Please fix the highlighted fields", firstError);
+            return;
+        }
 
         const brandId = getBrandId();
         if (!brandId) {
@@ -1715,21 +1709,6 @@ export default function EditCampaignPage() {
 
                                             <AccordionCard title="Audience & Platforms" subtitle="Choose where and who this campaign should reach.">
                                                 <div className="grid gap-4 md:grid-cols-2">
-                                                    <div className="md:col-span-2">
-                                                        <FloatingMultiSelect
-                                                            {...SEARCHABLE_UI}
-                                                            label="Platform Selection"
-                                                            required
-                                                            value={form.platforms}
-                                                            options={MANUAL_PLATFORM_OPTIONS}
-                                                            onValueChange={(next) => setField("platforms", next)}
-                                                            includeAll={false}
-                                                            searchable={false}
-                                                            state={stateFor("platforms")}
-                                                            errorText={msgFor("platforms")}
-                                                        />
-                                                    </div>
-
                                                     <FloatingMultiSelect
                                                         {...countrySearchProps}
                                                         label="Target country"

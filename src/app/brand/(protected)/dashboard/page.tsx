@@ -2,14 +2,12 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
+
 import { addDays, format } from "date-fns";
 import {
   ArrowLeft,
-  Graph,
   ArrowRight,
   CalendarDots,
-  Gift,
   Plus,
   ArrowUpRight,
   Money,
@@ -20,7 +18,6 @@ import {
   Check,
   ChartLine,
   Clock,
-  DotsThree,
   ArrowDownLeft,
 } from "@phosphor-icons/react";
 import { post, get } from "@/lib/api";
@@ -92,6 +89,8 @@ type CampaignRow = {
 
   numberOfInfluencers?: number;
   platformSelection?: string[];
+  productImage?: string | null;
+  productImages?: string[];
 };
 
 type BrandDashboardHomePayload = {
@@ -144,7 +143,13 @@ type ApplicantDecisionField = "isShortlisted" | "isUndicided" | "isRejected";
 
 type InboxRow = {
   threadId: string;
-  influencer: { influencerId: string | null; name: string };
+  influencer: {
+    influencerId: string | null;
+    name: string;
+    profileImage?: string;
+    profilePic?: string;
+    avatarUrl?: string;
+  };
   subject: string;
   snippet: string;
   lastMessageAt: string | null;
@@ -168,6 +173,8 @@ type BrandAppliedCampaignApi = {
   campaignsId?: string | null;
   campaignTitle: string;
   productOrServiceName?: string;
+  productImage?: string | null;
+  productImages?: string[];
   appliedInfluencerCount?: number;
   appliedInfluencers: BrandAppliedInfluencerApi[];
 };
@@ -253,12 +260,21 @@ type ReleaseMilestoneRow = {
   currency?: string;
 };
 
+type CampaignStatusVariant =
+  | "active"
+  | "paused"
+  | "completed"
+  | "draft"
+  | "published"
+  | "inactive";
+
 type CampaignListRow = {
   id: string;
   title: string;
   subtitle: string;
-  isActive: boolean;
+  imageUrl?: string;
   statusLabel: string;
+  statusVariant: CampaignStatusVariant;
   progress: number;
   daysLeft: string;
   activeInfluencers: ActiveInfluencerRow[];
@@ -361,9 +377,55 @@ const getPlatformIconSrc = (platform: string) => {
   return "";
 };
 
+const getCampaignImage = (
+  productImage?: string | null,
+  productImages?: string[] | null
+) => {
+  if (productImage) return productImage;
+
+  if (Array.isArray(productImages)) {
+    return productImages.find((image) => Boolean(image)) || "";
+  }
+
+  return "";
+};
+
 function unwrap<T>(res: any): T {
   return (res?.data ?? res) as T;
 }
+
+const collectBackendMessages = (value: any): string[] => {
+  if (!value) return [];
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectBackendMessages(item));
+  }
+
+  if (typeof value === "object") {
+    const messages: string[] = [];
+
+    ["message", "messages", "error", "errors", "detail", "details"].forEach((key) => {
+      if (key in value) {
+        messages.push(...collectBackendMessages(value[key]));
+      }
+    });
+
+    return Array.from(new Set(messages));
+  }
+
+  return [];
+};
+
+const getBackendMessage = (value: any, fallback: string) => {
+  const messages = collectBackendMessages(value);
+
+  return messages.length ? messages.join("\n") : fallback;
+};
 
 const toMs = (d: string | null | undefined) => {
   const t = d ? new Date(d).getTime() : 0;
@@ -452,10 +514,67 @@ const getPaymentHistoryRows = (
   });
 };
 
-const isCampaignActive = (campaign: CampaignRow) => {
-  const status = String(campaign.status || campaign.campaignStatus || "").toLowerCase();
+const getCampaignStatusMeta = (campaign: CampaignRow) => {
+  const rawStatus = String(
+    campaign.status ||
+    campaign.campaignStatus ||
+    campaign.publishStatus ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
 
-  return Number(campaign.isActive || 0) === 1 || status.includes("active");
+  if (rawStatus === "active") {
+    return {
+      label: "Active",
+      variant: "active" as const,
+    };
+  }
+
+  if (rawStatus === "paused") {
+    return {
+      label: "Paused",
+      variant: "paused" as const,
+    };
+  }
+
+  if (rawStatus === "completed") {
+    return {
+      label: "Completed",
+      variant: "completed" as const,
+    };
+  }
+
+  if (rawStatus === "draft") {
+    return {
+      label: "Draft",
+      variant: "draft" as const,
+    };
+  }
+
+  if (rawStatus === "published") {
+    return Number(campaign.isActive || 0) === 1
+      ? {
+        label: "Active",
+        variant: "active" as const,
+      }
+      : {
+        label: "Published",
+        variant: "published" as const,
+      };
+  }
+
+  if (Number(campaign.isActive || 0) === 1) {
+    return {
+      label: "Active",
+      variant: "active" as const,
+    };
+  }
+
+  return {
+    label: rawStatus ? rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1) : "Inactive",
+    variant: "inactive" as const,
+  };
 };
 
 const getStartOfDayMs = (date: Date) => {
@@ -470,18 +589,77 @@ const getEndOfDayMs = (date: Date) => {
   return d.getTime();
 };
 
-const isCampaignOnSelectedDate = (campaign: CampaignRow, selectedDate: Date) => {
+const isSameSelectedDay = (
+  dateValue: string | null | undefined,
+  selectedDate: Date
+) => {
+  if (!dateValue) return false;
+
+  const date = new Date(dateValue);
+
+  if (!Number.isFinite(date.getTime())) return false;
+
+  return getStartOfDayMs(date) === getStartOfDayMs(selectedDate);
+};
+
+const isCampaignEndedBeforeSelectedDate = (
+  endAt: string | null | undefined,
+  selectedDate: Date
+) => {
+  if (!endAt) return false;
+
+  const endDate = new Date(endAt);
+
+  if (!Number.isFinite(endDate.getTime())) return false;
+
+  return getEndOfDayMs(endDate) < getStartOfDayMs(selectedDate);
+};
+
+const isSelectedDateInsideCampaignRange = (
+  campaign: CampaignRow,
+  selectedDate: Date
+) => {
   const selectedStart = getStartOfDayMs(selectedDate);
   const selectedEnd = getEndOfDayMs(selectedDate);
 
-  const start = campaign.startAt ? getStartOfDayMs(new Date(campaign.startAt)) : null;
-  const end = campaign.endAt ? getEndOfDayMs(new Date(campaign.endAt)) : null;
+  const start = campaign.startAt
+    ? getStartOfDayMs(new Date(campaign.startAt))
+    : null;
 
-  if (!start && !end) return true;
-  if (start && !end) return selectedEnd >= start;
-  if (!start && end) return selectedStart <= end;
+  const end = campaign.endAt
+    ? getEndOfDayMs(new Date(campaign.endAt))
+    : null;
 
-  return selectedEnd >= Number(start) && selectedStart <= Number(end);
+  if (!start && !end) return false;
+
+  if (start && end) {
+    return selectedEnd >= start && selectedStart <= end;
+  }
+
+  if (start && !end) {
+    return selectedEnd >= start;
+  }
+
+  if (!start && end) {
+    return selectedStart <= end;
+  }
+
+  return false;
+};
+
+const isCampaignOnSelectedDate = (
+  campaign: CampaignRow,
+  selectedDate: Date
+) => {
+  if (isCampaignEndedBeforeSelectedDate(campaign.endAt, selectedDate)) {
+    return false;
+  }
+
+  return (
+    isSelectedDateInsideCampaignRange(campaign, selectedDate) ||
+    isSameSelectedDay(campaign.createdAt, selectedDate) ||
+    isSameSelectedDay(campaign.updatedAt, selectedDate)
+  );
 };
 
 /* ---------------- page ---------------- */
@@ -540,8 +718,8 @@ const DashboardPageSkeleton = () => {
             </div>
           </section>
 
-          <div className="grid w-full items-stretch gap-6 xl:grid-cols-12">
-            <div className="flex w-full min-w-0 flex-col gap-6 xl:col-span-8">
+          <div className="grid w-full items-start gap-6 xl:grid-cols-12">
+            <div className="flex w-full min-w-0 flex-col gap-6 xl:col-span-8 xl:h-[30rem] xl:overflow-hidden">
               <SkeletonCard rows={4} />
               <SkeletonCard rows={5} />
             </div>
@@ -825,6 +1003,44 @@ export default function BrandDashboardHome() {
     });
   }, [brandAppliedData?.campaigns]);
 
+  const removeAppliedInfluencerFromList = (campaignId: string, influencerId: string) => {
+    setBrandAppliedData((prev) => {
+      if (!prev) return prev;
+
+      return {
+        ...prev,
+        campaigns: (prev.campaigns || []).map((campaign) => {
+          const currentCampaignId = campaign.campaignId || campaign.campaignsId || "";
+
+          if (currentCampaignId !== campaignId) return campaign;
+
+          const previousInfluencers = campaign.appliedInfluencers || [];
+          const nextInfluencers = previousInfluencers.filter(
+            (influencer) => influencer.influencerId !== influencerId
+          );
+
+          return {
+            ...campaign,
+            appliedInfluencers: nextInfluencers,
+            appliedInfluencerCount: nextInfluencers.length,
+          };
+        }),
+      };
+    });
+
+    setData((prev) => {
+      if (!prev) return prev;
+
+      return {
+        ...prev,
+        totalAppliedInfluencers: Math.max(
+          0,
+          Number(prev.totalAppliedInfluencers || 0) - 1
+        ),
+      };
+    });
+  };
+
   const handleApplicantDecision = async (
     row: AppliedInfluencerRow,
     field: ApplicantDecisionField
@@ -850,22 +1066,47 @@ export default function BrandDashboardHome() {
 
       const payload = unwrap<{ message?: string }>(response);
 
-      const successMessage =
-        payload?.message ||
-        (field === "isShortlisted"
+      const successMessage = getBackendMessage(
+        payload,
+        field === "isShortlisted"
           ? "Influencer shortlisted successfully"
           : field === "isUndicided"
             ? "Influencer marked as undecided"
-            : "Influencer rejected successfully");
+            : "Influencer rejected successfully"
+      );
 
-      toast.success(successMessage);
+      setBrandAppliedData((prev) => {
+        if (!prev) return prev;
+
+        return {
+          ...prev,
+          campaigns: prev.campaigns.map((campaign) => {
+            const currentCampaignId = campaign.campaignId || campaign.campaignsId || "";
+
+            if (currentCampaignId !== campaignId) return campaign;
+
+            const updatedAppliedInfluencers = (campaign.appliedInfluencers || []).filter(
+              (influencer) => influencer.influencerId !== influencerId
+            );
+
+            return {
+              ...campaign,
+              appliedInfluencers: updatedAppliedInfluencers,
+              appliedInfluencerCount: Math.max(
+                0,
+                Number(campaign.appliedInfluencerCount || 0) - 1
+              ),
+            };
+          }),
+        };
+      });
+
+      router.refresh();
     } catch (err: any) {
       console.error("Could not update applicant decision", err);
 
-      toast.error(
-        err?.response?.data?.message ||
-        err?.response?.data?.error ||
-        err?.message ||
+      const errorMessage = getBackendMessage(
+        err,
         "Could not update applicant decision"
       );
     } finally {
@@ -878,22 +1119,53 @@ export default function BrandDashboardHome() {
   };
 
   const campaignListRows = useMemo<CampaignListRow[]>(() => {
+    const appliedCampaignImageMap = new Map<string, string>();
+
+    (brandAppliedData?.campaigns || []).forEach((campaign) => {
+      const campaignId = campaign.campaignId || campaign.campaignsId || "";
+      const imageUrl = getCampaignImage(
+        campaign.productImage,
+        campaign.productImages
+      );
+
+      if (campaignId && imageUrl) {
+        appliedCampaignImageMap.set(campaignId, imageUrl);
+      }
+    });
+
     return (data?.campaigns || [])
       .filter((campaign) =>
         dateFilterMode === "all" || isCampaignOnSelectedDate(campaign, selectedDate)
       )
       .map((campaign, index) => {
+        const id =
+          campaign.campaignId ||
+          campaign.campaignsId ||
+          campaign.id ||
+          `campaign-${index}`;
+
         const title =
           campaign.campaignTitle ||
           campaign.productOrServiceName ||
           `Campaign ${index + 1}`;
 
+        const imageUrl =
+          getCampaignImage(campaign.productImage, campaign.productImages) ||
+          appliedCampaignImageMap.get(id) ||
+          "";
+        const statusMeta = getCampaignStatusMeta(campaign);
+
         return {
-          id: campaign.campaignId || campaign.campaignsId || campaign.id || `campaign-${index}`,
+          id,
           title,
-          subtitle: campaign.goal || campaign.goals?.[0] || campaign.productOrServiceName || "Campaign",
-          isActive: isCampaignActive(campaign),
-          statusLabel: isCampaignActive(campaign) ? "Active" : "Inactive",
+          subtitle:
+            campaign.goal ||
+            campaign.goals?.[0] ||
+            campaign.productOrServiceName ||
+            "Campaign",
+          imageUrl,
+          statusLabel: statusMeta.label,
+          statusVariant: statusMeta.variant,
           progress: getTimelineProgress(campaign.startAt, campaign.endAt),
           daysLeft: getDaysLeft(campaign.endAt),
           activeInfluencers: Array.isArray(campaign.activeInfluencers)
@@ -901,7 +1173,7 @@ export default function BrandDashboardHome() {
             : [],
         };
       });
-  }, [data?.campaigns, dateFilterMode, selectedDate]);
+  }, [data?.campaigns, brandAppliedData?.campaigns, dateFilterMode, selectedDate]);
 
   const workingInfluencers = useMemo<ActiveInfluencerRow[]>(() => {
     const map = new Map<string, ActiveInfluencerRow>();
@@ -1004,7 +1276,7 @@ export default function BrandDashboardHome() {
     {
       title: "All Campaign",
       value: campaignMetricValue,
-      subtitle: dateFilterMode === "all" ? "All-time campaigns" : "Campaigns on selected date",
+      subtitle: dateFilterMode === "all" ? "All-time campaigns" : "Active Campaigns on selected date",
       rightLabel: campaignCardRightLabel,
       icon: <CalendarDots size={16} weight="bold" />,
       onClick: () => router.push("/brand/campaign/all"),
@@ -1037,7 +1309,13 @@ export default function BrandDashboardHome() {
   const quickActions = [
     {
       label: "AI Campaign",
-      icon: <Sparkle size={18} weight="fill" className="text-[#FF8A00]" />,
+      icon: (
+        <img
+          src="/Component%207.svg"
+          alt="AI Campaign"
+          className="h-[1.125rem] w-[1.125rem] object-contain"
+        />
+      ),
       onClick: openAiCampaigns,
     },
     {
@@ -1047,12 +1325,24 @@ export default function BrandDashboardHome() {
     },
     {
       label: "Add funds",
-      icon: <Money size={18} weight="fill" className="text-[#2EA84A]" />,
+      icon: (
+        <img
+          src="/money.png"
+          alt="Add funds"
+          className="h-[2rem] w-[2rem] object-contain"
+        />
+      ),
       onClick: () => router.push("/brand/wallet"),
     },
     {
       label: "Raise Dispute",
-      icon: <Question size={18} weight="bold" className="text-[#B6ADA5]" />,
+      icon: (
+        <img
+          src="/questionmark.png"
+          alt="Raise Dispute"
+          className="h-[1.25rem] w-[1.25rem] object-contain"
+        />
+      ),
       onClick: () => router.push("/brand/disputes"),
     },
   ];
@@ -1088,15 +1378,16 @@ export default function BrandDashboardHome() {
               <button
                 type="button"
                 onClick={() => router.push("/brand/insight-os")}
-                className="flex items-center justify-center gap-1 rounded-[0.75rem] px-2 text-center font-inter text-[0.75rem] font-medium leading-4 text-[#3A3A3A] transition hover:bg-[#F7F7F7] cursor-pointer"
+                className="flex h-10 items-center justify-center rounded-lg px-2 transition hover:bg-[#F9F9F9] cursor-pointer"
               >
-                <Graph size={14} weight="bold" />
-                <span>Insight OS</span>
+                <span className="font-inter text-[1rem] font-semibold leading-6 tracking-[0] bg-[linear-gradient(90deg,#FFBF00_0%,#F6BB2A_35%,#F3584E_70%,#E078D1_100%)] bg-clip-text text-transparent">
+                  InsightOS
+                </span>
               </button>
 
               <button
                 type="button"
-                onClick={() => router.push("/brand/create-campaign")}
+                onClick={() => router.push("/brand/create-campaign?byAi=1")}
                 className="flex items-center justify-center gap-1 rounded-[0.75rem] bg-[#1A1A1A] px-3 text-center font-inter text-[0.75rem] font-medium leading-4 text-white transition hover:bg-black"
               >
                 <Plus size={14} weight="bold" />
@@ -1172,35 +1463,55 @@ export default function BrandDashboardHome() {
               </div>
             </div>
 
-            <div className="grid w-full grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-              {dashboardCards.map((card) => (
-                <DashboardMetricCard key={card.title} {...card} />
+            <div className="flex h-[10.75rem] w-full items-center overflow-hidden rounded-lg border border-[#E6E6E6] bg-white">
+              {dashboardCards.map((card, index) => (
+                <React.Fragment key={card.title}>
+                  <div className="min-w-0 flex-1 self-stretch">
+                    <DashboardMetricCard {...card} />
+                  </div>
+
+                  {index < dashboardCards.length - 1 ? (
+                    <div
+                      aria-hidden="true"
+                      className="my-5 w-px shrink-0 self-stretch bg-[#E6E6E6]"
+                    />
+                  ) : null}
+                </React.Fragment>
               ))}
             </div>
 
-            <div className="grid w-full grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4 hover:bg-[#F9F9F9]">
-              {quickActions.map((action) => (
-                <button
-                  key={action.label}
-                  type="button"
-                  onClick={action.onClick}
-                  className="flex h-[3.75rem] items-center justify-between rounded-lg border border-[#E6E6E6] bg-white px-5 transition hover:bg-[#F7F7F7] "
-                >
-                  <span className="flex items-center gap-2 font-inter text-[1rem] font-medium leading-6 text-[#1A1A1A]">
-                    {action.icon}
-                    {action.label}
-                  </span>
+            <div className="flex h-[3.75rem] w-full items-center overflow-hidden rounded-lg border border-[#E6E6E6] bg-white">
+              {quickActions.map((action, index) => (
+                <React.Fragment key={action.label}>
+                  <div className="flex h-full min-w-0 flex-1 items-center justify-between bg-white px-5">
+                    <span className="flex items-center gap-2 font-inter text-[1rem] font-medium leading-6 text-[#1A1A1A]">
+                      {action.icon}
+                      {action.label}
+                    </span>
 
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E6E6E6]">
-                    <ArrowRight size={16} weight="bold" />
-                  </span>
-                </button>
+                    <button
+                      type="button"
+                      onClick={action.onClick}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E6E6E6] transition hover:bg-[#F7F7F7] cursor-pointer"
+                      aria-label={action.label}
+                    >
+                      <ArrowRight size={16} weight="bold" />
+                    </button>
+                  </div>
+
+                  {index < quickActions.length - 1 ? (
+                    <div
+                      aria-hidden="true"
+                      className="my-5 w-px shrink-0 self-stretch bg-[#E6E6E6]"
+                    />
+                  ) : null}
+                </React.Fragment>
               ))}
             </div>
           </section>
 
-          <div className="grid w-full items-stretch gap-6 xl:grid-cols-12">
-            <div className="flex w-full min-w-0 flex-col gap-6 xl:col-span-8">
+          <div className="grid w-full items-start gap-6 xl:grid-cols-12">
+            <div className="flex w-full min-w-0 flex-col gap-6 xl:col-span-8 xl:h-[30rem] xl:overflow-hidden">
               <AppliedInfluencerSection
                 rows={appliedInfluencers}
                 onDecision={handleApplicantDecision}
@@ -1221,7 +1532,7 @@ export default function BrandDashboardHome() {
                 onOpenCampaign={(id) => router.push(`/brand/campaign/view-campaign?id=${id}`)}
               />
             </div>
-            <div className="flex h-full w-full min-w-0 flex-col gap-6 xl:col-span-4">
+            <div className="flex w-full min-w-0 flex-col xl:col-span-4 xl:h-[30rem] xl:overflow-hidden">
               {/* <ReleaseMilestoneSection rows={releaseMilestones} /> */}
 
               <DashboardInboxSection
@@ -1286,7 +1597,7 @@ const DashboardMetricCard = ({
           onClick?.();
         }
       }}
-      className={`flex min-h-[10.625rem] w-full min-w-0 flex-col items-start justify-between rounded-lg border border-[#E6E6E6] bg-white px-5 py-4 ${isClickable ? "cursor-pointer transition hover:bg-[#F9F9F9]" : ""
+      className={`flex h-full w-full min-w-0 flex-col items-start justify-between bg-white px-5 py-4 ${isClickable ? "cursor-pointer transition hover:bg-[#F9F9F9]" : ""
         }`}
     >
       <div className="flex w-full min-w-0 items-start justify-between gap-3">
@@ -1398,17 +1709,17 @@ const AppliedInfluencerSection = ({
   onOpenInfluencer: (campaignId: string, campaignDisplayTitle: string) => void;
 }) => {
   return (
-    <section className="flex w-full min-w-0 rounded-lg border border-[#E6E6E6] bg-white px-5 pt-4 pb-3 pr-1">
-      <div className="flex w-full min-w-0 flex-col gap-6">
+    <section className="flex w-full min-w-0 overflow-hidden rounded-lg border border-[#E6E6E6] bg-white px-5 pt-4 pb-3 pr-1 xl:h-[14.25rem] xl:flex-none">
+      <div className="flex min-h-0 w-full min-w-0 flex-col gap-4">
         <div className="flex w-full items-center justify-between gap-4">
           <h3 className="font-inter text-[1rem] font-medium leading-6 tracking-[0] text-[#1A1A1A]">
             Applied Influencer
           </h3>
         </div>
 
-        <div className={`${dashboardScrollbarClass} max-h-[19.5rem] w-full`}>
+        <div className={`${dashboardScrollbarClass} min-h-0 w-full flex-1`}>
           {!rows.length ? (
-            <div className="py-10 text-center font-inter text-[0.875rem] text-[#969696]">
+            <div className="flex h-full items-center justify-center text-center font-inter text-[0.875rem] text-[#969696]">
               No applied influencers yet.
             </div>
           ) : (
@@ -1511,7 +1822,7 @@ const AppliedInfluencerItem = ({
           </span>
         </div>
 
-        <div className="ml-auto flex h-10 shrink-0 items-stretch lg:ml-20">
+        <div className="ml-auto flex h-10 shrink-0 items-stretch overflow-hidden rounded-lg border border-[#D6D6D6] bg-white lg:ml-20">
           <button
             type="button"
             onClick={(e) => {
@@ -1519,11 +1830,14 @@ const AppliedInfluencerItem = ({
               onDecision(row, "isRejected");
             }}
             disabled={isDecisionLoading}
-            className="flex w-10 items-center justify-center rounded-l-lg border-y border-l border-[#D6D6D6] text-[#1A1A1A] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+            className="group flex w-10 items-center justify-center bg-white text-[#1A1A1A] transition hover:bg-[#F3584E] hover:text-white disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
             aria-label="Reject"
           >
             <X size={24} weight="regular" />
           </button>
+
+          <span className="w-px bg-[#D6D6D6]" aria-hidden="true" />
+
           <button
             type="button"
             onClick={(e) => {
@@ -1531,7 +1845,7 @@ const AppliedInfluencerItem = ({
               onDecision(row, "isShortlisted");
             }}
             disabled={isDecisionLoading}
-            className="flex w-10 items-center justify-center rounded-r-lg border-y border-r border-[#D6D6D6] text-[#1A1A1A] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+            className="group flex w-10 items-center justify-center bg-white text-[#1A1A1A] transition hover:bg-[#19B36B] hover:text-white disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
             aria-label="Shortlist"
           >
             <Check size={24} weight="regular" />
@@ -1625,7 +1939,7 @@ const DashboardInboxSection = ({
   onOpenThread: (threadId: string) => void;
 }) => {
   return (
-    <section className="flex min-h-[30rem] w-full min-w-0 flex-1 rounded-lg border border-[#E6E6E6] bg-white px-5 pt-4 pb-3">
+    <section className="flex h-[30rem] w-full min-w-0 overflow-hidden rounded-lg border border-[#E6E6E6] bg-white px-5 pt-4 pb-3 xl:h-full">
       <div className="flex min-h-0 w-full min-w-0 flex-col gap-6">
         <div className="flex w-full items-center justify-between gap-4">
           <h3 className="font-inter text-[1rem] font-medium leading-6 tracking-[0] text-[#1A1A1A]">
@@ -1657,6 +1971,11 @@ const DashboardInboxSection = ({
             <div className="flex w-full flex-col">
               {rows.map((row) => {
                 const name = row.influencer?.name || "Influencer";
+                const profileImage =
+                  row.influencer?.profilePic ||
+                  row.influencer?.profileImage ||
+                  row.influencer?.avatarUrl ||
+                  "";
                 const subject = row.subject || "No subject";
                 const description = row.snippet || "No message preview";
                 const time = row.lastMessageAt ? fmtDate(row.lastMessageAt, "HH:mm") : "";
@@ -1669,7 +1988,7 @@ const DashboardInboxSection = ({
                     className="flex w-full min-w-0 items-start gap-2 border-b border-[#E6E6E6] px-2 pt-2 pb-3 text-left transition hover:bg-[#F9F9F9] cursor-pointer"
                   >
                     <AvatarBox
-                      src=""
+                      src={profileImage}
                       name={name}
                       sizeClass="h-[1.375rem] w-[1.375rem]"
                       darkFallback
@@ -1716,8 +2035,8 @@ const CampaignListSection = ({
   onOpenCampaign: (id: string) => void;
 }) => {
   return (
-    <section className="flex w-full self-start rounded-lg border border-[#E6E6E6] bg-white px-5 pt-4 pb-3 pr-1">
-      <div className="flex w-full min-w-0 flex-col gap-6">
+    <section className="flex w-full overflow-hidden rounded-lg border border-[#E6E6E6] bg-white px-5 pt-4 pb-3 pr-1 xl:h-[14.25rem] xl:flex-none">
+      <div className="flex min-h-0 w-full min-w-0 flex-col gap-4">
         <div className="flex w-full items-center justify-between gap-4">
           <h3 className="font-inter text-[1rem] font-medium leading-6 tracking-[0] text-[#1A1A1A]">
             All Campaigns
@@ -1732,10 +2051,10 @@ const CampaignListSection = ({
           </button>
         </div>
 
-        <div className={`${dashboardScrollbarClass} max-h-[23.75rem] w-full`}>
+        <div className={`${dashboardScrollbarClass} min-h-0 w-full flex-1`}>
           {!campaigns.length ? (
-            <div className="py-10 text-center font-inter text-[0.875rem] text-[#969696]">
-              NA
+            <div className="flex h-full items-center justify-center text-center font-inter text-[0.875rem] text-[#969696]">
+              No Campaign Found
             </div>
           ) : (
             <div className="flex w-full flex-col">
@@ -1754,7 +2073,12 @@ const CampaignListSection = ({
                   className="flex w-full min-w-0 cursor-pointer flex-col gap-3 border-b border-[#E6E6E6] py-3 text-left last:border-b-0 xl:flex-row xl:items-center xl:justify-between hover:bg-[#F9F9F9]"
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-3">
-                    <AvatarBox name={campaign.title} sizeClass="h-10 w-10" darkFallback />
+                    <AvatarBox
+                      src={campaign.imageUrl}
+                      name={campaign.title}
+                      sizeClass="h-10 w-10"
+                      darkFallback
+                    />
 
                     <div className="min-w-0">
                       <p className="truncate font-inter text-[0.875rem] font-semibold leading-5 text-[#1A1A1A]">
@@ -1769,7 +2093,7 @@ const CampaignListSection = ({
 
                   <div className="flex min-w-0 shrink-0 flex-wrap items-center xl:flex-nowrap">
                     <CampaignStatusBadge
-                      active={campaign.isActive}
+                      variant={campaign.statusVariant}
                       label={campaign.statusLabel}
                     />
 
@@ -1817,21 +2141,61 @@ const CampaignListSection = ({
 };
 
 const CampaignStatusBadge = ({
-  active,
+  variant,
   label,
 }: {
-  active: boolean;
+  variant: CampaignStatusVariant;
   label: string;
 }) => {
+  const statusStyles: Record<
+    CampaignStatusVariant,
+    {
+      dotWrap: string;
+      dot: string;
+      text: string;
+    }
+  > = {
+    active: {
+      dotWrap: "bg-[#EAF6EC]",
+      dot: "bg-[#19B36B]",
+      text: "text-[#19B36B]",
+    },
+    paused: {
+      dotWrap: "bg-[#FFF4E5]",
+      dot: "bg-[#FF8A00]",
+      text: "text-[#FF8A00]",
+    },
+    completed: {
+      dotWrap: "bg-[#EEF4FF]",
+      dot: "bg-[#3B82F6]",
+      text: "text-[#3B82F6]",
+    },
+    draft: {
+      dotWrap: "bg-[#F2F2F2]",
+      dot: "bg-[#969696]",
+      text: "text-[#969696]",
+    },
+    published: {
+      dotWrap: "bg-[#F4EEFF]",
+      dot: "bg-[#8B5CF6]",
+      text: "text-[#8B5CF6]",
+    },
+    inactive: {
+      dotWrap: "bg-[#F2F2F2]",
+      dot: "bg-[#969696]",
+      text: "text-[#969696]",
+    },
+  };
+
+  const currentStyle = statusStyles[variant] || statusStyles.inactive;
+
   return (
     <span className="flex shrink-0 items-center gap-1 rounded-3xl bg-[#F9F9F9] px-2 py-1 font-inter text-[0.75rem] font-medium leading-4">
-      <span className={`flex rounded-2xl p-0.5 ${active ? "bg-[#EAF6EC]" : "bg-[#F2F2F2]"}`}>
-        <span className={`h-2 w-2 rounded-full ${active ? "bg-[#19B36B]" : "bg-[#969696]"}`} />
+      <span className={`flex rounded-2xl p-0.5 ${currentStyle.dotWrap}`}>
+        <span className={`h-2 w-2 rounded-full ${currentStyle.dot}`} />
       </span>
 
-      <span className={active ? "text-[#19B36B]" : "text-[#969696]"}>
-        {label}
-      </span>
+      <span className={currentStyle.text}>{label}</span>
     </span>
   );
 };

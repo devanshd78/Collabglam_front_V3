@@ -81,9 +81,33 @@ type CookieOptions = {
 };
 
 const ONBOARDING_RESUME_KEY = "cg_influencer_onboarding_resume_step";
-const Login_S3_Image =
-  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image7.webp";
+const LOGIN_S3_IMAGES = [
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image1.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image2.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image3.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image5.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image6.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image7.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image8.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image9.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image10.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image11.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image12.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image13.webp",
+  "https://collaglam-campaign.s3.us-east-1.amazonaws.com/image14.webp",
+] as const;
 
+function getNextLoginImageIndex(currentIndex = -1) {
+  if (LOGIN_S3_IMAGES.length <= 1) return 0;
+
+  let nextIndex = currentIndex;
+
+  while (nextIndex === currentIndex) {
+    nextIndex = Math.floor(Math.random() * LOGIN_S3_IMAGES.length);
+  }
+
+  return nextIndex;
+}
 function normalizeStoredString(value: unknown): string | null {
   if (typeof value !== "string") return null;
 
@@ -476,6 +500,7 @@ function InfluencerLoginContent() {
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [loading, setLoading] = React.useState(false);
+  const [loginImageIndex, setLoginImageIndex] = React.useState(0);
 
   const [emailError, setEmailError] = React.useState<string>("");
   const [passwordError, setPasswordError] = React.useState<string>("");
@@ -495,7 +520,7 @@ function InfluencerLoginContent() {
     try {
       const token = normalizeStoredString(
         localStorage.getItem("token") ||
-          localStorage.getItem("influencerToken"),
+        localStorage.getItem("influencerToken"),
       );
 
       const influencerId = normalizeStoredString(
@@ -530,6 +555,33 @@ function InfluencerLoginContent() {
       setAuthGuardReady(true);
     }
   }, [redirectAuthenticatedInfluencerUser]);
+
+  React.useEffect(() => {
+    setLoginImageIndex(() => getNextLoginImageIndex());
+  }, []);
+
+  React.useEffect(() => {
+    if (!loading) return;
+
+    setLoginImageIndex((currentIndex) => getNextLoginImageIndex(currentIndex));
+  }, [loading]);
+
+  React.useEffect(() => {
+    const handleTabVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+
+      setLoginImageIndex((currentIndex) => getNextLoginImageIndex(currentIndex));
+    };
+
+    document.addEventListener("visibilitychange", handleTabVisibilityChange);
+
+    return () => {
+      document.removeEventListener(
+        "visibilitychange",
+        handleTabVisibilityChange,
+      );
+    };
+  }, []);
 
   const clearEmailOnFocus = () => {
     if (emailError) setEmailError("");
@@ -635,7 +687,8 @@ function InfluencerLoginContent() {
     "/influencer/signup",
     safeReturnUrl,
   );
-
+  const loginHeroImage =
+    LOGIN_S3_IMAGES[loginImageIndex] || LOGIN_S3_IMAGES[0];
   return (
     <div className="min-h-screen bg-background text-foreground">
       <ToastStyles />
@@ -699,7 +752,7 @@ function InfluencerLoginContent() {
                 <div
                   className="absolute inset-0 z-[1]"
                   style={{
-                    background: `lightgray url(${Login_S3_Image}) 50% / cover no-repeat`,
+                    background: `lightgray url(${loginHeroImage}) 50% / cover no-repeat`,
                     mixBlendMode: "luminosity",
                   }}
                 />

@@ -168,7 +168,7 @@ export default function CampaignCardMenu({
       <PopoverPrimitive.Trigger asChild>
         <button
           type="button"
-          className="inline-flex h-[2.85rem] items-center justify-center bg-background text-muted-foreground shadow-none hover:text-tx-secondary"
+          className="inline-flex h-[2.85rem] items-center justify-center bg-background text-muted-foreground shadow-none hover:text-tx-secondary cursor-pointer"
           aria-label="More options"
         >
           <DotsThree size={18} weight="bold" />

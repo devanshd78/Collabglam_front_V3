@@ -691,24 +691,6 @@ export default function CampaignFilter({
   return (
     <div className="mt-8 flex w-full flex-wrap items-start justify-between gap-x-10 gap-y-3">
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-3">
-        <SingleSelectCombobox
-          label="Campaign Type"
-          ariaLabel="Campaign Type"
-          value={campaignType}
-          onChange={setCampaignType}
-          options={[
-            { value: "all", label: "All" },
-            { value: "paid", label: "Paid" },
-            { value: "gifting", label: "Gifting" },
-            { value: "affiliate", label: "Affiliate" },
-            { value: "ambassador", label: "Ambassador" },
-            { value: "event", label: "Event" },
-            { value: "ugc_only", label: "UGC Only" },
-            { value: "sponsored", label: "Sponsored" },
-            { value: "paid_bonus", label: "Paid + Bonus" },
-          ]}
-        />
-
         {showCreatorStatus ? (
           <SingleSelectCombobox
             label="Creator Status"

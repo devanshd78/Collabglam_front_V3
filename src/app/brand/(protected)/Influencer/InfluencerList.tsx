@@ -1784,7 +1784,7 @@ export default function InfluencerList() {
       );
 
       const targetTab = actionToTab[action];
-      if (targetTab) router.push(`/brand/influ/${targetTab}?campaignId=${campaignId}`);
+      if (targetTab) router.push(`/brand/Influencer/${targetTab}?campaignId=${campaignId}`);
     } catch (e) {
       alert(getApiErrorMessage(e, "Failed to update applicant status"));
     } finally {

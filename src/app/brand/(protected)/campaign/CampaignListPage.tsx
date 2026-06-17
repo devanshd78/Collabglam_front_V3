@@ -1,10 +1,13 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import BrandCampaignCard from "@/components/ui/brand/card";
 
-import BrandCampaignCard, {
-  BrandCampaignCardSkeleton,
-} from "@/components/ui/brand/card";
+import SkeletonLoader, {
+  SkeletonProvider,
+  SkeletonCard,
+  SkeletonInboxList,
+} from "@/components/common/SkeletonLoader";
 import { Button } from "@/components/ui/buttonComp";
 import { PencilSimple } from "@phosphor-icons/react";
 
@@ -650,6 +653,57 @@ const CARD_GRID =
   "grid w-full min-w-0 auto-rows-fr gap-[clamp(12px,2vw,24px)] " +
   "[grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr))]";
 
+const CLICKABLE_CARD_HOVER =
+  "h-full min-w-0 cursor-pointer transition-all duration-200 ease-out " +
+  "hover:-translate-y-0.5 " +
+  "[&>div:last-child]:transition-colors [&>div:last-child]:duration-200 " +
+  "hover:[&>div:last-child]:bg-muted/40";
+
+const CLICKABLE_LIST_HOVER =
+  "cursor-pointer transition-all duration-200 ease-out " +
+  "hover:-translate-y-0.5 hover:bg-muted/40";
+
+const INITIAL_SKELETON_COUNT = 10;
+
+function CampaignListViewSkeleton() {
+  return (
+    <div className="w-full min-w-0">
+      <SkeletonInboxList rows={6} />
+    </div>
+  );
+}
+
+function CampaignCardViewSkeleton() {
+  return (
+    <div className={GRID_WRAP}>
+      <div className={CARD_GRID}>
+        {Array.from({ length: INITIAL_SKELETON_COUNT }).map((_, index) => (
+          <div key={index} className="min-w-0">
+            <SkeletonCard rows={4} tall />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CampaignPageSkeleton({ viewMode }: { viewMode: ViewMode }) {
+  return (
+    <div className="w-full min-w-0">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <SkeletonLoader className="h-4 w-32 rounded-md" />
+        <SkeletonLoader className="h-4 w-24 rounded-md" />
+      </div>
+
+      {viewMode === "list" ? (
+        <CampaignListViewSkeleton />
+      ) : (
+        <CampaignCardViewSkeleton />
+      )}
+    </div>
+  );
+}
+
 export default function CampaignListPage({
   title,
   fixedStatus,
@@ -1002,7 +1056,6 @@ export default function CampaignListPage({
     const campaignBudget = c.campaignBudget ?? 0;
     const imageUrls = allImages(c);
     const platforms = ((c.platformSelection ?? []) as string[]);
-    const platformCount = platforms.length;
 
     const goToInfluencers = () => {
       if (locked) return;
@@ -1029,7 +1082,7 @@ export default function CampaignListPage({
     const handleView = () => {
       if (locked) return;
       if (typeof window !== "undefined") {
-        window.location.href = getManageInfluencerHref(campaignId,campaignTitle);
+        window.location.href = getManageInfluencerHref(campaignId, campaignTitle);
       }
     };
 
@@ -1086,11 +1139,11 @@ export default function CampaignListPage({
           tabIndex={locked ? -1 : 0}
           onClick={handleCardClick}
           onKeyDown={handleCardKeyDown}
-          className={locked ? "h-full min-w-0" : "h-full min-w-0 cursor-pointer"}
+          className={locked ? "h-full min-w-0 cursor-pointer" : CLICKABLE_CARD_HOVER}
           title={locked ? LOCK_TOOLTIP : `View ${campaignTitle}`}
         >
           <BrandCampaignCard
-            className="h-full min-w-0"
+            className={locked ? "h-full min-w-0" : CLICKABLE_CARD_HOVER}
             size="md"
             logoUrl={imageUrls[0] || ""}
             logoUrls={imageUrls}
@@ -1101,20 +1154,27 @@ export default function CampaignListPage({
             edgeBadges={edgeBadges}
             headerRight={
               locked ? null : (
-                <CampaignCardMenu
-                  viewHref={viewHref}
-                  inviteHref={inviteHref}
-                  campaignStatus={c.status}
-                  isDraft={c.isDraft}
-                  isFullyManaged={fullyManaged}
-                />
+                <div
+                  data-no-card-click="true"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <CampaignCardMenu
+                    viewHref={viewHref}
+                    inviteHref={inviteHref}
+                    campaignStatus={c.status}
+                    isDraft={c.isDraft}
+                    isFullyManaged={fullyManaged}
+                  />
+                </div>
               )
             }
             tags={[c.category?.name || "No Category"]}
             stats={[
               {
                 label: "Platform",
-                value: platformCount,
+                value: "",
               },
               {
                 label: "Budget",
@@ -1163,6 +1223,7 @@ export default function CampaignListPage({
                       variant="outline"
                       className="h-[2.85rem] w-[2.65rem] rounded-[0.75rem] border-border px-0 shadow-none"
                       onClick={handleEdit}
+                      onMouseDown={(e) => e.stopPropagation()}
                       aria-label="Edit campaign"
                       disabled={locked}
                     >
@@ -1204,11 +1265,14 @@ export default function CampaignListPage({
       const handleView = () => {
         if (locked) return;
         if (typeof window !== "undefined") {
-          window.location.href = getManageInfluencerHref(campaignId,campaignTitle);
+          window.location.href = getManageInfluencerHref(campaignId, campaignTitle);
         }
       };
 
-      const handleEdit = () => {
+      const handleEdit = (e?: React.MouseEvent) => {
+        e?.preventDefault();
+        e?.stopPropagation();
+
         if (locked) return;
         if (typeof window !== "undefined") {
           window.location.href = getCampaignEditHref(c, campaignId, campaignTitle);
@@ -1217,6 +1281,8 @@ export default function CampaignListPage({
 
       return {
         key: campaignId,
+        className: locked ? undefined : CLICKABLE_LIST_HOVER,
+
         onClick: () => {
           if (locked) return;
           if (typeof window !== "undefined") {
@@ -1237,7 +1303,6 @@ export default function CampaignListPage({
           {
             id: "platform",
             label: "Platform",
-            value: platforms.length,
             icon: MetricIcons.Platform,
           },
           {
@@ -1275,7 +1340,13 @@ min-[981px]:w-auto"
           </Button>
         ),
         menuSlot: locked ? null : (
-          <div className="flex items-center gap-2">
+          <div
+            className="flex items-center gap-2"
+            data-no-card-click="true"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
             {showEditButton && !fullyManaged ? (
               <Button
                 type="button"
@@ -1313,76 +1384,68 @@ min-[981px]:w-auto"
     hasLoadedOnce && !loading && filteredItems.length === 0 && !errMsg;
 
   return (
-    <div className="w-full min-w-0 px-4 py-6 sm:px-6 md:px-10 lg:px-12">
-      <CampaignFilter
-        campaignType={campaignType}
-        setCampaignType={setCampaignType}
-        creatorStatus={creatorStatus}
-        setCreatorStatus={setCreatorStatus}
-        categoryIds={categoryIds}
-        setCategoryIds={setCategoryIds}
-        dateFilter={dateFilter}
-        setDateFilter={setDateFilter}
-        aiCreated={aiCreated}
-        setAiCreated={setAiCreated}
-        searchInput={searchInput}
-        setSearchInput={setSearchInput}
-        viewMode={viewMode}
-        setViewMode={setViewMode}
-        showCreatorStatus={showCreatorStatusFilter}
-      />
+    <SkeletonProvider>
+      <div className="w-full min-w-0 px-4 py-6 sm:px-6 md:px-10 lg:px-12">
+        <CampaignFilter
+          campaignType={campaignType}
+          setCampaignType={setCampaignType}
+          creatorStatus={creatorStatus}
+          setCreatorStatus={setCreatorStatus}
+          categoryIds={categoryIds}
+          setCategoryIds={setCategoryIds}
+          dateFilter={dateFilter}
+          setDateFilter={setDateFilter}
+          aiCreated={aiCreated}
+          setAiCreated={setAiCreated}
+          searchInput={searchInput}
+          setSearchInput={setSearchInput}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          showCreatorStatus={showCreatorStatusFilter}
+        />
 
-      {errMsg && <div className="mt-4 text-sm text-red-600">{errMsg}</div>}
+        {errMsg && <div className="mt-4 text-sm text-red-600">{errMsg}</div>}
 
-      <div className="mt-6">
-        {showInitialSkeleton ? (
-          viewMode === "list" ? (
-            <div className="space-y-4" />
+        <div className="mt-6">
+          {showInitialSkeleton ? (
+            <CampaignPageSkeleton viewMode={viewMode} />
+          ) : showEmptyState ? (
+            <div className="text-sm text-gray-500">No campaigns found.</div>
           ) : (
-            <div className={GRID_WRAP}>
-              <div className={CARD_GRID}>
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <BrandCampaignCardSkeleton key={i} />
-                ))}
-              </div>
-            </div>
-          )
-        ) : showEmptyState ? (
-          <div className="text-sm text-gray-500">No campaigns found.</div>
-        ) : (
-          <>
-            {viewMode === "list" ? (
-              <ListCardView items={listItems} />
-            ) : (
-              <div className={GRID_WRAP}>
-                <div className={CARD_GRID}>
-                  {filteredItems.map(renderGridCard)}
+            <>
+              {viewMode === "list" ? (
+                <ListCardView items={listItems} />
+              ) : (
+                <div className={GRID_WRAP}>
+                  <div className={CARD_GRID}>
+                    {filteredItems.map(renderGridCard)}
+                  </div>
                 </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+              )}
+            </>
+          )}
+        </div>
 
-      <footer className="mt-auto flex justify-center pb-6 pt-6">
-        {hasMore ? (
-          <Button
-            type="button"
-            variant="outline"
-            disabled={loading || loadingMore}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            {loadingMore ? "Loading..." : "Load more"}
-          </Button>
-        ) : hasLoadedOnce && filteredItems.length > 0 ? (
-          <div
-            className="text-center text-sm"
-            style={{ color: "var(--Light-Text-Subtle, #8C8C8C)" }}
-          >
-            You've reached the end.
-          </div>
-        ) : null}
-      </footer>
-    </div>
+        <footer className="mt-auto flex justify-center pb-6 pt-6">
+          {hasMore ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading || loadingMore}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              {loadingMore ? "Loading..." : "Load more"}
+            </Button>
+          ) : hasLoadedOnce && filteredItems.length > 0 ? (
+            <div
+              className="text-center text-sm"
+              style={{ color: "var(--Light-Text-Subtle, #8C8C8C)" }}
+            >
+              You've reached the end.
+            </div>
+          ) : null}
+        </footer>
+      </div>
+    </SkeletonProvider>
   );
 }
