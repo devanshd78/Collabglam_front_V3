@@ -26,10 +26,13 @@ export type InfluencerRow = {
     followers: number;
   }>;
   followers?: number;
+  engagement?: number;
   appliedDate: string;
   status?: string;
   budget?: string;
   contractId?: string;
+  __source?: string;
+  __raw?: any;
 };
 
 type BulkHeaderRenderer = (args: {
@@ -214,7 +217,7 @@ function AvatarThumb({
     />
   ) : (
     <div
-      className={`${sizeClass} flex shrink-0 items-center justify-center rounded-[0.5rem] border`}
+      className={`${sizeClass} shrink-0 rounded-[0.5rem] border flex items-center justify-center`}
       style={{
         borderColor:
           "var(--Light-Border-Border-stroke, rgba(255,255,255,0.30))",
@@ -380,13 +383,12 @@ export function ActionGroup({
   );
 }
 
-function XScroll({ children }: { children: React.ReactNode }) {
+function RowXScroll({ children }: { children: React.ReactNode }) {
   return (
     <div
       className="
-        w-full overflow-x-auto overflow-y-hidden
-        [scrollbar-width:none] [-ms-overflow-style:none]
-        [&::-webkit-scrollbar]:hidden
+        w-full overflow-x-auto overflow-y-hidden rounded-[0.75rem]
+        scrollbar-none scrollbar-hide
       "
     >
       {children}
@@ -395,10 +397,16 @@ function XScroll({ children }: { children: React.ReactNode }) {
 }
 
 const DEFAULT_TABLE_GRID =
-  "grid w-full min-w-[78rem] grid-cols-[3rem_minmax(17rem,1.35fr)_minmax(13rem,1fr)_minmax(10rem,0.75fr)_minmax(8rem,0.65fr)_minmax(9rem,0.65fr)_8rem]";
+  "grid w-full grid-cols-[3rem_minmax(17rem,1.35fr)_minmax(13rem,1fr)_minmax(10rem,0.75fr)_minmax(8rem,0.65fr)_minmax(9rem,0.65fr)_minmax(26rem,1.25fr)]";
+
+const DEFAULT_TABLE_GRID_ROW =
+  "grid w-full min-w-[92rem] grid-cols-[3rem_minmax(17rem,1.35fr)_minmax(13rem,1fr)_minmax(10rem,0.75fr)_minmax(8rem,0.65fr)_minmax(9rem,0.65fr)_minmax(26rem,1.25fr)]";
 
 const DEFAULT_TABLE_GRID_NO_APPLIED =
-  "grid w-full min-w-[68rem] grid-cols-[3rem_minmax(17rem,1.35fr)_minmax(13rem,1fr)_minmax(10rem,0.75fr)_minmax(8rem,0.65fr)_8rem]";
+  "grid w-full grid-cols-[3rem_minmax(17rem,1.35fr)_minmax(13rem,1fr)_minmax(10rem,0.75fr)_minmax(8rem,0.65fr)_minmax(26rem,1.25fr)]";
+
+const DEFAULT_TABLE_GRID_NO_APPLIED_ROW =
+  "grid w-full min-w-[82rem] grid-cols-[3rem_minmax(17rem,1.35fr)_minmax(13rem,1fr)_minmax(10rem,0.75fr)_minmax(8rem,0.65fr)_minmax(26rem,1.25fr)]";
 
 const colShort = {
   checkbox: "flex-none w-[3.5rem]",
@@ -407,7 +415,7 @@ const colShort = {
   platform: "min-w-[9rem] flex-[2.5_1_0%] min-w-0",
   budget: "min-w-[9rem] flex-[2.5_1_0%] min-w-0",
   date: "min-w-[10rem] flex-[2.5_1_0%] shrink-0",
-  actions: "min-w-[21rem] flex-[3_1_0%] shrink-0",
+  actions: "min-w-[31rem] flex-[4_1_0%] shrink-0",
 };
 
 function DefaultTable({
@@ -426,9 +434,14 @@ function DefaultTable({
   hideAppliedDate?: boolean;
 }) {
   const [selected, setSelected] = React.useState<Record<string, boolean>>({});
-  const tableGridClass = hideAppliedDate
+
+  const headerGridClass = hideAppliedDate
     ? DEFAULT_TABLE_GRID_NO_APPLIED
     : DEFAULT_TABLE_GRID;
+
+  const rowGridClass = hideAppliedDate
+    ? DEFAULT_TABLE_GRID_NO_APPLIED_ROW
+    : DEFAULT_TABLE_GRID_ROW;
 
   const selectedIdList = rows
     .filter((r) => Boolean(selected[r.id]))
@@ -462,197 +475,114 @@ function DefaultTable({
 
   return (
     <div className="flex w-full flex-col">
-      <XScroll>
-        <div className="w-full">
-          {hasSelection && renderBulkHeader ? (
-            <div className="mb-4">
-              {renderBulkHeader({
-                selectedIds: selectedIdList,
-                selectedRows,
-                clearSelection,
-              })}
+      {hasSelection && renderBulkHeader ? (
+        <div className="mb-4">
+          {renderBulkHeader({
+            selectedIds: selectedIdList,
+            selectedRows,
+            clearSelection,
+          })}
+        </div>
+      ) : (
+        <div
+          className={`${headerGridClass} h-14 items-center rounded-br-[0.75rem] rounded-bl-[0.75rem] rounded-tr-[0.75rem] bg-[var(--Light-Background-Neutral,#F2F2F2)]`}
+        >
+          <div className="flex h-14 items-center justify-center rounded-tl-[0.75rem]">
+            <Checkbox
+              className="cursor-pointer"
+              checked={
+                allChecked ? true : someChecked ? "indeterminate" : false
+              }
+              onCheckedChange={(v) => toggleAll(Boolean(v))}
+              aria-label="Select all influencers"
+            />
+          </div>
+
+          <div className="flex h-14 items-center justify-between px-4 py-[0.625rem]">
+            <span style={headerTextStyle}>Profile</span>
+            <HeaderCarets />
+          </div>
+
+          <div className="flex h-14 items-center justify-between px-4 py-[0.625rem]">
+            <span style={headerTextStyle}>Category</span>
+            <HeaderCarets />
+          </div>
+
+          <div className="flex h-14 items-center justify-between px-4 py-[0.625rem]">
+            <span style={headerTextStyle}>Status</span>
+            <HeaderCarets />
+          </div>
+
+          <div className="flex h-14 items-center justify-between px-4 py-[0.625rem]">
+            <span style={headerTextStyle}>Followers</span>
+            <HeaderCarets />
+          </div>
+
+          {!hideAppliedDate ? (
+            <div className="flex h-14 items-center justify-between px-4 py-[0.625rem]">
+              <span style={headerTextStyle}>Applied Date</span>
+              <HeaderCarets />
             </div>
-          ) : (
-            <div
-              className={`${tableGridClass} h-14 items-center rounded-br-[0.75rem] rounded-bl-[0.75rem] rounded-tr-[0.75rem] bg-[var(--Light-Background-Neutral,#F2F2F2)]`}
-            >
-              <div className="flex h-14 items-center justify-center rounded-tl-[0.75rem]">
-                <Checkbox
-                  className="cursor-pointer"
-                  checked={
-                    allChecked ? true : someChecked ? "indeterminate" : false
-                  }
-                  onCheckedChange={(v) => toggleAll(Boolean(v))}
-                  aria-label="Select all influencers"
-                />
-              </div>
+          ) : null}
 
-              <div className="flex h-14 items-center justify-between px-4 py-[0.625rem]">
-                <span style={headerTextStyle}>Profile</span>
-                <HeaderCarets />
-              </div>
+          <div className="flex h-14 items-center justify-center px-4 py-[0.625rem]">
+            <span style={headerTextStyle}>Action</span>
+          </div>
+        </div>
+      )}
 
-              <div className="flex h-14 items-center justify-between px-4 py-[0.625rem]">
-                <span style={headerTextStyle}>Category</span>
-                <HeaderCarets />
-              </div>
+      <div className="mt-[2rem] w-full space-y-3">
+        {rows.map((r) => {
+          const plat = getPlatformRows(r);
+          const appliedText = formatDDMMYY(r.appliedDate);
+          const statusText = r.status ?? "Shortlisted";
+          const externalProfileUrl = getPlatformProfileUrl(r);
 
-              <div className="flex h-14 items-center justify-between px-4 py-[0.625rem]">
-                <span style={headerTextStyle}>Status</span>
-                <HeaderCarets />
-              </div>
-
-              <div className="flex h-14 items-center justify-between px-4 py-[0.625rem]">
-                <span style={headerTextStyle}>Followers</span>
-                <HeaderCarets />
-              </div>
-
-              {!hideAppliedDate ? (
-                <div className="flex h-14 items-center justify-between px-4 py-[0.625rem]">
-                  <span style={headerTextStyle}>Applied Date</span>
-                  <HeaderCarets />
+          return (
+            <RowXScroll key={r.id}>
+              <div
+                className={`${rowGridClass} items-center overflow-hidden rounded-[0.75rem] border border-[var(--Light-Border-Primary,#D6D6D6)] bg-white`}
+              >
+                <div className="flex h-[5.5rem] items-center justify-center bg-white">
+                  <Checkbox
+                    className="cursor-pointer"
+                    checked={Boolean(selected[r.id])}
+                    onCheckedChange={(v) => toggleOne(r.id, Boolean(v))}
+                    aria-label={`Select ${r.profile.name}`}
+                  />
                 </div>
-              ) : null}
 
-              <div className="flex h-14 items-center justify-center px-4 py-[0.625rem]">
-                <span style={headerTextStyle}>Action</span>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-[2rem] w-full space-y-3">
-            {rows.map((r) => {
-              const plat = getPlatformRows(r);
-              const appliedText = formatDDMMYY(r.appliedDate);
-              const statusText = r.status ?? "Shortlisted";
-              const externalProfileUrl = getPlatformProfileUrl(r);
-
-              return (
-                <div
-                  key={r.id}
-                  className={`${tableGridClass} items-center overflow-hidden rounded-[0.75rem] border border-[var(--Light-Border-Primary,#D6D6D6)] bg-white`}
-                >
-                  <div className="flex h-[5.5rem] items-center justify-center bg-white">
-                    <Checkbox
-                      className="cursor-pointer"
-                      checked={Boolean(selected[r.id])}
-                      onCheckedChange={(v) => toggleOne(r.id, Boolean(v))}
-                      aria-label={`Select ${r.profile.name}`}
+                <div className="flex h-[5.5rem] min-w-0 items-center bg-white px-4 py-[0.625rem]">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <AvatarThumb
+                      avatarUrl={r.profile.avatarUrl}
+                      name={r.profile.name}
                     />
-                  </div>
 
-                  <div className="flex h-[5.5rem] min-w-0 items-center bg-white px-4 py-[0.625rem]">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <AvatarThumb
-                        avatarUrl={r.profile.avatarUrl}
-                        name={r.profile.name}
-                      />
-
-                      <div className="flex min-w-0 flex-col">
-                        <span
-                          className="truncate hover:cursor-pointer hover:underline"
-                          style={{
-                            color: "var(--Light-Text-Primary, #1A1A1A)",
-                            fontFamily: "var(--Font-Family-Inter, Inter)",
-                            fontSize: "var(--Font-Size-16, 1rem)",
-                            fontStyle: "normal",
-                            fontWeight: 500,
-                            lineHeight: "var(--Line-Height-24, 1.5rem)",
-                            letterSpacing: "var(--Letter-Spacing-0, 0)",
-                          }}
-                          title={r.profile.name}
-                          onClick={() => openMediakit(r)}
-                        >
-                          {r.profile.name}
-                        </span>
-
-                        <button
-                          type="button"
-                          disabled={!externalProfileUrl}
-                          className="mt-1 max-w-full truncate text-left hover:underline disabled:cursor-default disabled:no-underline"
-                          style={{
-                            color: "var(--Light-Text-Secondary, #969696)",
-                            fontFamily: "var(--Font-Family-Inter, Inter)",
-                            fontSize: "var(--Font-Size-14, 0.875rem)",
-                            fontStyle: "normal",
-                            fontWeight: 400,
-                            lineHeight: "var(--Line-Height-20, 1.25rem)",
-                            letterSpacing: "var(--Letter-Spacing-0, 0)",
-                          }}
-                          title={externalProfileUrl || r.profile.handle || ""}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openExternalProfile(r);
-                          }}
-                        >
-                          {r.profile.handle ?? ""}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex h-[5.5rem] min-w-0 items-center justify-center bg-white px-4 py-[0.625rem]">
-                    <PillTag text={r.category} />
-                  </div>
-
-                  <div className="flex h-[5.5rem] min-w-0 items-center justify-center bg-white px-4 py-[0.625rem]">
-                    {renderStatus ? renderStatus(r) : <PillTag text={statusText} />}
-                  </div>
-
-                  <div className="flex h-[5.5rem] items-center justify-center bg-white px-4 py-[0.625rem]">
-                    <div className="flex w-fit flex-col justify-center gap-2">
-                      {plat.map((p) => (
-                        <button
-                          type="button"
-                          key={`f-${r.id}-${p.platform}`}
-                          disabled={!externalProfileUrl}
-                          className="flex w-fit items-center gap-2 disabled:cursor-default"
-                          title={externalProfileUrl || p.platform}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openExternalProfile(r);
-                          }}
-                        >
-                          <span
-                            className="flex h-5 w-5 items-center justify-center rounded-full border border-[var(--Light-Border-Subtle,#E6E6E6)] bg-white"
-                            style={{ borderWidth: "0.5px", padding: "0.25rem" }}
-                            aria-hidden="true"
-                          >
-                            <img
-                              src={PLATFORM_ICON_SRC[p.platform]}
-                              alt=""
-                              className="h-5 w-5"
-                              draggable={false}
-                            />
-                          </span>
-
-                          <span
-                            style={{
-                              color: "var(--Light-Text-Primary, #1A1A1A)",
-                              fontFamily: "Inter",
-                              fontSize: "0.75rem",
-                              fontStyle: "normal",
-                              fontWeight: 400,
-                              lineHeight: "1rem",
-                            }}
-                          >
-                            {formatCompact(p.followers)}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {!hideAppliedDate ? (
-                    <div className="flex h-[5.5rem] items-center justify-center bg-white px-4 py-[0.625rem]">
+                    <div className="flex min-w-0 flex-col">
                       <span
-                        className="truncate"
+                        className="truncate hover:cursor-pointer hover:underline"
                         style={{
-                          width: "100%",
-                          overflow: "hidden",
+                          color: "var(--Light-Text-Primary, #1A1A1A)",
+                          fontFamily: "var(--Font-Family-Inter, Inter)",
+                          fontSize: "var(--Font-Size-16, 1rem)",
+                          fontStyle: "normal",
+                          fontWeight: 500,
+                          lineHeight: "var(--Line-Height-24, 1.5rem)",
+                          letterSpacing: "var(--Letter-Spacing-0, 0)",
+                        }}
+                        title={r.profile.name}
+                        onClick={() => openMediakit(r)}
+                      >
+                        {r.profile.name}
+                      </span>
+
+                      <button
+                        type="button"
+                        disabled={!externalProfileUrl}
+                        className="mt-1 max-w-full truncate text-left hover:underline disabled:cursor-default disabled:no-underline"
+                        style={{
                           color: "var(--Light-Text-Secondary, #969696)",
-                          textAlign: "center",
-                          textOverflow: "ellipsis",
                           fontFamily: "var(--Font-Family-Inter, Inter)",
                           fontSize: "var(--Font-Size-14, 0.875rem)",
                           fontStyle: "normal",
@@ -660,28 +590,108 @@ function DefaultTable({
                           lineHeight: "var(--Line-Height-20, 1.25rem)",
                           letterSpacing: "var(--Letter-Spacing-0, 0)",
                         }}
-                        title={appliedText}
+                        title={externalProfileUrl || r.profile.handle || ""}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openExternalProfile(r);
+                        }}
                       >
-                        {appliedText}
-                      </span>
+                        {r.profile.handle ?? ""}
+                      </button>
                     </div>
-                  ) : null}
-
-                  <div className="flex h-[5.5rem] items-center justify-center bg-white px-3 py-[0.625rem]">
-                    {(renderActions ? renderActions(r) : null) ?? (
-                      <ActionGroup
-                        onReject={() => onActionClick?.(r, "isRejected")}
-                        onUndecided={() => onActionClick?.(r, "isUndicided")}
-                        onSelect={() => onActionClick?.(r, "isShortlisted")}
-                      />
-                    )}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      </XScroll>
+
+                <div className="flex h-[5.5rem] min-w-0 items-center justify-center bg-white px-4 py-[0.625rem]">
+                  <PillTag text={r.category} />
+                </div>
+
+                <div className="flex h-[5.5rem] min-w-0 items-center justify-center bg-white px-4 py-[0.625rem]">
+                  {renderStatus ? renderStatus(r) : <PillTag text={statusText} />}
+                </div>
+
+                <div className="flex h-[5.5rem] items-center justify-center bg-white px-4 py-[0.625rem]">
+                  <div className="flex w-fit flex-col justify-center gap-2">
+                    {plat.map((p) => (
+                      <button
+                        type="button"
+                        key={`f-${r.id}-${p.platform}`}
+                        disabled={!externalProfileUrl}
+                        className="flex w-fit items-center gap-2 disabled:cursor-default"
+                        title={externalProfileUrl || p.platform}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openExternalProfile(r);
+                        }}
+                      >
+                        <span
+                          className="flex h-5 w-5 items-center justify-center rounded-full border border-[var(--Light-Border-Subtle,#E6E6E6)] bg-white"
+                          style={{ borderWidth: "0.5px", padding: "0.25rem" }}
+                          aria-hidden="true"
+                        >
+                          <img
+                            src={PLATFORM_ICON_SRC[p.platform]}
+                            alt=""
+                            className="h-5 w-5"
+                            draggable={false}
+                          />
+                        </span>
+
+                        <span
+                          style={{
+                            color: "var(--Light-Text-Primary, #1A1A1A)",
+                            fontFamily: "Inter",
+                            fontSize: "0.75rem",
+                            fontStyle: "normal",
+                            fontWeight: 400,
+                            lineHeight: "1rem",
+                          }}
+                        >
+                          {formatCompact(p.followers)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {!hideAppliedDate ? (
+                  <div className="flex h-[5.5rem] items-center justify-center bg-white px-4 py-[0.625rem]">
+                    <span
+                      className="truncate"
+                      style={{
+                        width: "100%",
+                        overflow: "hidden",
+                        color: "var(--Light-Text-Secondary, #969696)",
+                        textAlign: "center",
+                        textOverflow: "ellipsis",
+                        fontFamily: "var(--Font-Family-Inter, Inter)",
+                        fontSize: "var(--Font-Size-14, 0.875rem)",
+                        fontStyle: "normal",
+                        fontWeight: 400,
+                        lineHeight: "var(--Line-Height-20, 1.25rem)",
+                        letterSpacing: "var(--Letter-Spacing-0, 0)",
+                      }}
+                      title={appliedText}
+                    >
+                      {appliedText}
+                    </span>
+                  </div>
+                ) : null}
+
+                <div className="flex h-[5.5rem] items-center justify-end bg-white px-3 py-[0.625rem]">
+                  {(renderActions ? renderActions(r) : null) ?? (
+                    <ActionGroup
+                      onReject={() => onActionClick?.(r, "isRejected")}
+                      onUndecided={() => onActionClick?.(r, "isUndicided")}
+                      onSelect={() => onActionClick?.(r, "isShortlisted")}
+                    />
+                  )}
+                </div>
+              </div>
+            </RowXScroll>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -784,226 +794,225 @@ function ShortlistedTable({
 
   return (
     <div className="flex w-full flex-col">
-      <XScroll>
-        <div className="min-w-full w-max">
-          {hasSelection && renderBulkHeader ? (
-            <div className="mb-4 min-w-[73rem]">
-              {renderBulkHeader({
-                selectedIds: activeSelectedIds,
-                selectedRows: activeSelectedRows,
-                clearSelection,
-              })}
-            </div>
-          ) : (
-            <div
-              className="
-                flex h-14 w-full min-w-[73rem] items-center
-                bg-[var(--Light-Background-Neutral,#F2F2F2)]
-                rounded-tr-[0.75rem] rounded-bl-[0.75rem] rounded-br-[0.75rem]
-              "
-            >
+      {hasSelection && renderBulkHeader ? (
+        <div className="mb-4">
+          {renderBulkHeader({
+            selectedIds: activeSelectedIds,
+            selectedRows: activeSelectedRows,
+            clearSelection,
+          })}
+        </div>
+      ) : (
+        <div
+          className="
+            flex h-14 w-full items-center
+            bg-[var(--Light-Background-Neutral,#F2F2F2)]
+            rounded-tr-[0.75rem] rounded-bl-[0.75rem] rounded-br-[0.75rem]
+          "
+        >
+          <div
+            className={`${colShort.checkbox} flex h-14 items-center justify-center rounded-tl-[0.75rem]`}
+          >
+            {selectable ? (
+              <Checkbox
+                className="cursor-pointer"
+                checked={allChecked ? true : someChecked ? "indeterminate" : false}
+                onCheckedChange={() => onToggleAll?.()}
+                aria-label="Select all"
+              />
+            ) : null}
+          </div>
+
+          <div className={`${colShort.profile} flex h-14 items-center justify-between px-4 py-[0.625rem]`}>
+            <span style={headerTextStyle}>Profile</span>
+            <HeaderCarets />
+          </div>
+
+          <div className={`${colShort.status} flex h-14 items-center justify-between px-4 py-[0.625rem]`}>
+            <span style={headerTextStyle}>Status</span>
+            <HeaderCarets />
+          </div>
+
+          <div className={`${colShort.platform} flex h-14 items-center justify-between px-4 py-[0.625rem]`}>
+            <span style={headerTextStyle}>Platform</span>
+            <HeaderCarets />
+          </div>
+
+          <div className={`${colShort.budget} flex h-14 items-center justify-between px-4 py-[0.625rem]`}>
+            <span style={headerTextStyle}>Budget</span>
+            <HeaderCarets />
+          </div>
+
+          <div className={`${colShort.date} flex h-14 shrink-0 items-center justify-between px-4 py-[0.625rem]`}>
+            <span style={headerTextStyle}>Date</span>
+            <HeaderCarets />
+          </div>
+
+          <div className={`${colShort.actions} flex h-14 items-center justify-end py-[0.625rem] pl-8 pr-4`}>
+            <span style={headerTextStyle}>Action</span>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-[2rem] w-full space-y-3">
+        {rows.map((r) => {
+          const platRows = getPlatformRows(r);
+          const platforms = platRows.map((p) => p.platform);
+          const statusText = r.status ?? "Contract Sent";
+          const budgetText = r.budget ?? "₹0";
+          const dateText = formatDDMMYY(r.appliedDate);
+          const externalProfileUrl = getPlatformProfileUrl(r);
+
+          return (
+            <RowXScroll key={r.id}>
               <div
-                className={`${colShort.checkbox} flex h-14 items-center justify-center rounded-tl-[0.75rem]`}
+                className="
+                  flex w-full min-w-[94rem] items-center
+                  rounded-[0.75rem]
+                  border border-[var(--Light-Border-Primary,#D6D6D6)]
+                  bg-[var(--Light-Background-Primary,#FFF)]
+                  overflow-hidden
+                "
               >
-                {selectable ? (
+                <div className={`${colShort.checkbox} flex h-[5.5rem] items-center justify-center`}>
                   <Checkbox
                     className="cursor-pointer"
-                    checked={allChecked ? true : someChecked ? "indeterminate" : false}
-                    onCheckedChange={() => onToggleAll?.()}
-                    aria-label="Select all"
+                    checked={selectable ? selectedIds.includes(r.id) : Boolean(selected[r.id])}
+                    disabled={selectable ? !rowSelectable(r) : false}
+                    onCheckedChange={(v) => {
+                      if (selectable) {
+                        if (!rowSelectable(r)) return;
+                        onToggleRow?.(r.id);
+                        return;
+                      }
+
+                      toggleOneLocal(r.id, Boolean(v));
+                    }}
+                    aria-label={`Select ${r.profile.name}`}
                   />
-                ) : null}
-              </div>
+                </div>
 
-              <div className={`${colShort.profile} flex h-14 items-center justify-between px-4 py-[0.625rem]`}>
-                <span style={headerTextStyle}>Profile</span>
-                <HeaderCarets />
-              </div>
-
-              <div className={`${colShort.status} flex h-14 items-center justify-between px-4 py-[0.625rem]`}>
-                <span style={headerTextStyle}>Status</span>
-                <HeaderCarets />
-              </div>
-
-              <div className={`${colShort.platform} flex h-14 items-center justify-between px-4 py-[0.625rem]`}>
-                <span style={headerTextStyle}>Platform</span>
-                <HeaderCarets />
-              </div>
-
-              <div className={`${colShort.budget} flex h-14 items-center justify-between px-4 py-[0.625rem]`}>
-                <span style={headerTextStyle}>Budget</span>
-                <HeaderCarets />
-              </div>
-
-              <div className={`${colShort.date} flex h-14 shrink-0 items-center justify-between px-4 py-[0.625rem]`}>
-                <span style={headerTextStyle}>Date</span>
-                <HeaderCarets />
-              </div>
-
-              <div className={`${colShort.actions} flex h-14 items-center justify-end py-[0.625rem] pl-8 pr-4`}>
-                <span style={headerTextStyle}>Action</span>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-[2rem] w-full space-y-3">
-            {rows.map((r) => {
-              const platRows = getPlatformRows(r);
-              const platforms = platRows.map((p) => p.platform);
-              const statusText = r.status ?? "Contract Sent";
-              const budgetText = r.budget ?? "₹0";
-              const dateText = formatDDMMYY(r.appliedDate);
-              const externalProfileUrl = getPlatformProfileUrl(r);
-
-              return (
-                <div
-                  key={r.id}
-                  className="
-                    flex w-full min-w-[73rem] items-center
-                    rounded-[0.75rem]
-                    border border-[var(--Light-Border-Primary,#D6D6D6)]
-                    bg-[var(--Light-Background-Primary,#FFF)]
-                    overflow-hidden
-                  "
-                >
-                  <div className={`${colShort.checkbox} flex h-[5.5rem] items-center justify-center`}>
-                    <Checkbox
-                      className="cursor-pointer"
-                      checked={selectable ? selectedIds.includes(r.id) : Boolean(selected[r.id])}
-                      disabled={selectable ? !rowSelectable(r) : false}
-                      onCheckedChange={(v) => {
-                        if (selectable) {
-                          if (!rowSelectable(r)) return;
-                          onToggleRow?.(r.id);
-                          return;
-                        }
-
-                        toggleOneLocal(r.id, Boolean(v));
-                      }}
-                      aria-label={`Select ${r.profile.name}`}
+                <div className={`${colShort.profile} flex h-[5.5rem] items-center px-4`}>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <AvatarThumb
+                      avatarUrl={r.profile.avatarUrl}
+                      name={r.profile.name}
                     />
-                  </div>
 
-                  <div className={`${colShort.profile} flex h-[5.5rem] items-center px-4`}>
-                    <div className="flex min-w-0 items-center gap-3">
-                      <AvatarThumb
-                        avatarUrl={r.profile.avatarUrl}
-                        name={r.profile.name}
-                      />
+                    <div className="flex min-w-0 flex-col">
+                      <span
+                        className="truncate border-none outline-none hover:cursor-pointer hover:underline focus:outline-none focus:ring-0"
+                        style={{
+                          color: "var(--Light-Text-Primary, #1A1A1A)",
+                          fontFamily: "var(--Font-Family-Inter, Inter)",
+                          fontSize: "var(--Font-Size-16, 1rem)",
+                          fontStyle: "normal",
+                          fontWeight: 500,
+                          lineHeight: "var(--Line-Height-24, 1.5rem)",
+                          letterSpacing: "var(--Letter-Spacing-0, 0)",
+                        }}
+                        title={r.profile.name}
+                        onClick={() =>
+                          window.open(`/mediakit/${r.id}`, "_blank")
+                        }
+                      >
+                        {r.profile.name}
+                      </span>
 
-                      <div className="flex min-w-0 flex-col">
-                        <span
-                          className="truncate border-none outline-none hover:cursor-pointer hover:underline focus:outline-none focus:ring-0"
-                          style={{
-                            color: "var(--Light-Text-Primary, #1A1A1A)",
-                            fontFamily: "var(--Font-Family-Inter, Inter)",
-                            fontSize: "var(--Font-Size-16, 1rem)",
-                            fontStyle: "normal",
-                            fontWeight: 500,
-                            lineHeight: "var(--Line-Height-24, 1.5rem)",
-                            letterSpacing: "var(--Letter-Spacing-0, 0)",
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.25rem",
+                          marginTop: "0.25rem",
+                          minWidth: 0,
+                        }}
+                      >
+                        <button
+                          type="button"
+                          disabled={!externalProfileUrl}
+                          className="truncate text-left hover:underline disabled:cursor-default disabled:no-underline"
+                          style={handleStyle}
+                          title={externalProfileUrl || r.profile.handle || ""}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openExternalProfile(r);
                           }}
-                          title={r.profile.name}
-                          onClick={() => openMediakit(r)}
                         >
-                          {r.profile.name}
-                        </span>
+                          {r.profile.handle ?? ""}
+                        </button>
 
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "0.25rem",
-                            marginTop: "0.25rem",
-                            minWidth: 0,
-                          }}
-                        >
-                          <button
-                            type="button"
-                            disabled={!externalProfileUrl}
-                            className="truncate text-left hover:underline disabled:cursor-default disabled:no-underline"
-                            style={handleStyle}
-                            title={externalProfileUrl || r.profile.handle || ""}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openExternalProfile(r);
-                            }}
-                          >
-                            {r.profile.handle ?? ""}
-                          </button>
-
-                          {!!r.category && (
-                            <>
-                              <span aria-hidden="true" style={dotStyle} />
-                              <span className="truncate" style={categoryUnderHandleStyle} title={r.category}>
-                                {r.category}
-                              </span>
-                            </>
-                          )}
-                        </div>
+                        {!!r.category && (
+                          <>
+                            <span aria-hidden="true" style={dotStyle} />
+                            <span className="truncate" style={categoryUnderHandleStyle} title={r.category}>
+                              {r.category}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
+                </div>
 
-                  <div className={`${colShort.status} flex h-[5.5rem] items-center justify-center px-4`}>
-                    {renderStatus ? renderStatus(r) : <PillTag text={statusText} />}
-                  </div>
+                <div className={`${colShort.status} flex h-[5.5rem] items-center justify-center px-4`}>
+                  {renderStatus ? renderStatus(r) : <PillTag text={statusText} />}
+                </div>
 
-                  <div className={`${colShort.platform} flex h-[5.5rem] items-center justify-center px-4`}>
-                    <button
-                      type="button"
-                      disabled={!externalProfileUrl}
-                      title={externalProfileUrl || "Open profile"}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openExternalProfile(r);
-                      }}
-                      className="disabled:cursor-default"
-                    >
-                      <PlatformOverlap platforms={platforms} />
-                    </button>
-                  </div>
+                <div className={`${colShort.platform} flex h-[5.5rem] items-center justify-center px-4`}>
+                  <button
+                    type="button"
+                    disabled={!externalProfileUrl}
+                    title={externalProfileUrl || "Open profile"}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openExternalProfile(r);
+                    }}
+                    className="disabled:cursor-default"
+                  >
+                    <PlatformOverlap platforms={platforms} />
+                  </button>
+                </div>
 
-                  <div className={`${colShort.budget} flex h-[5.5rem] items-center justify-center px-4`}>
-                    <PillTag text={budgetText} />
-                  </div>
+                <div className={`${colShort.budget} flex h-[5.5rem] items-center justify-center px-4`}>
+                  <PillTag text={budgetText} />
+                </div>
 
-                  <div className={`${colShort.date} flex h-[5.5rem] items-center justify-center pl-4 pr-9`}>
-                    <span
-                      style={{
-                        flex: "1 0 0",
-                        color: "var(--Light-Text-Secondary, #969696)",
-                        textAlign: "center",
-                        fontFamily: "var(--Font-Family-Inter, Inter)",
-                        fontSize: "var(--Font-Size-14, 0.875rem)",
-                        fontStyle: "normal",
-                        fontWeight: "var(--Font-Weight-regular, 400)" as any,
-                        lineHeight: "var(--Line-Height-20, 1.25rem)",
-                        letterSpacing: "var(--Letter-Spacing-0, 0)",
-                      }}
-                      title={dateText}
-                    >
-                      {dateText}
-                    </span>
-                  </div>
+                <div className={`${colShort.date} flex h-[5.5rem] items-center justify-center pl-4 pr-9`}>
+                  <span
+                    style={{
+                      flex: "1 0 0",
+                      color: "var(--Light-Text-Secondary, #969696)",
+                      textAlign: "center",
+                      fontFamily: "var(--Font-Family-Inter, Inter)",
+                      fontSize: "var(--Font-Size-14, 0.875rem)",
+                      fontStyle: "normal",
+                      fontWeight: "var(--Font-Weight-regular, 400)" as any,
+                      lineHeight: "var(--Line-Height-20, 1.25rem)",
+                      letterSpacing: "var(--Letter-Spacing-0, 0)",
+                    }}
+                    title={dateText}
+                  >
+                    {dateText}
+                  </span>
+                </div>
 
-                  <div className={`${colShort.actions} flex h-[5.5rem] items-center justify-end pl-9 pr-4`}>
-                    <div className="flex w-full justify-end">
-                      {renderActions ? (
-                        renderActions(r)
-                      ) : (
-                        <span className="text-xs text-[var(--Light-Text-Secondary,#969696)]">
-                          No actions available
-                        </span>
-                      )}
-                    </div>
+                <div className={`${colShort.actions} flex h-[5.5rem] items-center justify-end pl-9 pr-4`}>
+                  <div className="flex w-full justify-end">
+                    {renderActions ? (
+                      renderActions(r)
+                    ) : (
+                      <span className="text-xs text-[var(--Light-Text-Secondary,#969696)]">
+                        No actions available
+                      </span>
+                    )}
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      </XScroll>
+              </div>
+            </RowXScroll>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1021,178 +1030,178 @@ function RecommendedTable({
   const border = "var(--Light-Border-Primary,#D6D6D6)";
 
   return (
-    <div className="flex w-full flex-col">
-      <XScroll>
-        <div className="min-w-full w-max space-y-3">
-          {rows.map((r) => {
-            const plat = getPlatformRows(r);
-            const appliedText = formatDDMMYY(r.appliedDate);
-            const externalProfileUrl = getPlatformProfileUrl(r);
+    <div className="flex w-full flex-col space-y-3">
+      {rows.map((r) => {
+        const plat = getPlatformRows(r);
+        const appliedText = formatDDMMYY(r.appliedDate);
+        const externalProfileUrl = getPlatformProfileUrl(r);
 
-            return (
-              <div key={r.id} className="flex w-full min-w-[52rem]">
-                <div
-                  style={{
-                    display: "flex",
-                    width: "15.3125rem",
-                    height: "5.5rem",
-                    padding: "0.625rem 1rem",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    gap: "0.5rem",
-                    borderRadius: "0.75rem 0 0 0.75rem",
-                    borderTop: `1px solid ${border}`,
-                    borderBottom: `1px solid ${border}`,
-                    borderLeft: `1px solid ${border}`,
-                    background: "var(--Light-Background-Primary, #FFF)",
-                    boxSizing: "border-box",
-                  }}
-                >
-                  <div className="flex w-full min-w-0 items-center gap-3">
-                    <AvatarThumb
-                      avatarUrl={r.profile.avatarUrl}
-                      name={r.profile.name}
-                    />
+        return (
+          <RowXScroll key={r.id}>
+            <div className="flex w-full min-w-[64rem]">
+              <div
+                style={{
+                  display: "flex",
+                  width: "15.3125rem",
+                  height: "5.5rem",
+                  padding: "0.625rem 1rem",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  borderRadius: "0.75rem 0 0 0.75rem",
+                  borderTop: `1px solid ${border}`,
+                  borderBottom: `1px solid ${border}`,
+                  borderLeft: `1px solid ${border}`,
+                  background: "var(--Light-Background-Primary, #FFF)",
+                  boxSizing: "border-box",
+                }}
+              >
+                <div className="flex w-full min-w-0 items-center gap-3">
+                  <AvatarThumb
+                    avatarUrl={r.profile.avatarUrl}
+                    name={r.profile.name}
+                  />
 
-                    <div className="flex min-w-0 flex-col">
-                      <span
-                        className="truncate hover:cursor-pointer hover:underline"
-                        style={{
-                          color: "var(--Light-Text-Primary, #1A1A1A)",
-                          fontFamily: "var(--Font-Family-Inter, Inter)",
-                          fontSize: "var(--Font-Size-16, 1rem)",
-                          fontWeight: 500,
-                          lineHeight: "var(--Line-Height-24, 1.5rem)",
-                          letterSpacing: "var(--Letter-Spacing-0, 0)",
-                        }}
-                        title={r.profile.name}
-                        onClick={() => openMediakit(r)}
-                      >
-                        {r.profile.name}
-                      </span>
-
-                      <button
-                        type="button"
-                        disabled={!externalProfileUrl}
-                        className="mt-1 truncate text-left hover:underline disabled:cursor-default disabled:no-underline"
-                        style={{
-                          color: "var(--Light-Text-Secondary, #969696)",
-                          fontFamily: "var(--Font-Family-Inter, Inter)",
-                          fontSize: "var(--Font-Size-14, 0.875rem)",
-                          fontWeight: 400,
-                          lineHeight: "var(--Line-Height-20, 1.25rem)",
-                          letterSpacing: "var(--Letter-Spacing-0, 0)",
-                        }}
-                        title={externalProfileUrl || r.profile.handle || ""}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openExternalProfile(r);
-                        }}
-                      >
-                        {r.profile.handle ?? ""}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div
-                  className={`${RECO_MID_GRID} h-[5.5rem] items-center bg-white py-[0.625rem]`}
-                  style={{
-                    borderTop: `1px solid ${border}`,
-                    borderBottom: `1px solid ${border}`,
-                    background: "var(--Light-Background-Primary, #FFF)",
-                    boxSizing: "border-box",
-                  }}
-                >
-                  <div className="flex items-center justify-center px-4">
-                    <PillTag text={r.category} />
-                  </div>
-
-                  <div className="flex items-center justify-center px-4">
-                    <div className="flex w-full flex-col justify-center gap-1">
-                      {plat.map((p) => (
-                        <button
-                          type="button"
-                          key={`pf-${r.id}-${p.platform}`}
-                          disabled={!externalProfileUrl}
-                          className="flex w-full items-center gap-2 disabled:cursor-default"
-                          title={externalProfileUrl || p.platform}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openExternalProfile(r);
-                          }}
-                        >
-                          <span
-                            className="flex h-4 w-4 items-center justify-center rounded-full border border-[var(--Light-Border-Subtle,#E6E6E6)] bg-white"
-                            style={{ borderWidth: "0.5px", padding: "0.125rem" }}
-                            aria-hidden="true"
-                          >
-                            <img src={PLATFORM_ICON_SRC[p.platform]} alt="" className="h-4 w-4" draggable={false} />
-                          </span>
-
-                          <span
-                            style={{
-                              color: "var(--Light-Text-Primary, #1A1A1A)",
-                              fontFamily: "Inter",
-                              fontSize: "0.75rem",
-                              fontWeight: 400,
-                              lineHeight: "1rem",
-                            }}
-                          >
-                            {formatCompact(p.followers)}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-center px-4">
+                  <div className="flex min-w-0 flex-col">
                     <span
-                      className="truncate"
+                      className="truncate hover:cursor-pointer hover:underline"
                       style={{
-                        width: "100%",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
+                        color: "var(--Light-Text-Primary, #1A1A1A)",
+                        fontFamily: "var(--Font-Family-Inter, Inter)",
+                        fontSize: "var(--Font-Size-16, 1rem)",
+                        fontWeight: 500,
+                        lineHeight: "var(--Line-Height-24, 1.5rem)",
+                        letterSpacing: "var(--Letter-Spacing-0, 0)",
+                      }}
+                      title={r.profile.name}
+                      onClick={() =>
+                        window.open(`/mediakit/${r.id}`, "_blank")
+                      }
+                    >
+                      {r.profile.name}
+                    </span>
+
+                    <button
+                      type="button"
+                      disabled={!externalProfileUrl}
+                      className="mt-1 truncate text-left hover:underline disabled:cursor-default disabled:no-underline"
+                      style={{
                         color: "var(--Light-Text-Secondary, #969696)",
-                        textAlign: "center",
                         fontFamily: "var(--Font-Family-Inter, Inter)",
                         fontSize: "var(--Font-Size-14, 0.875rem)",
                         fontWeight: 400,
                         lineHeight: "var(--Line-Height-20, 1.25rem)",
                         letterSpacing: "var(--Letter-Spacing-0, 0)",
                       }}
-                      title={appliedText}
+                      title={externalProfileUrl || r.profile.handle || ""}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openExternalProfile(r);
+                      }}
                     >
-                      {appliedText}
-                    </span>
+                      {r.profile.handle ?? ""}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className={`${RECO_MID_GRID} h-[5.5rem] items-center bg-white py-[0.625rem]`}
+                style={{
+                  borderTop: `1px solid ${border}`,
+                  borderBottom: `1px solid ${border}`,
+                  background: "var(--Light-Background-Primary, #FFF)",
+                  boxSizing: "border-box",
+                }}
+              >
+                <div className="flex items-center justify-center px-4">
+                  <PillTag text={r.category} />
+                </div>
+
+                <div className="flex items-center justify-center px-4">
+                  <div className="flex w-full flex-col justify-center gap-1">
+                    {plat.map((p) => (
+                      <button
+                        type="button"
+                        key={`pf-${r.id}-${p.platform}`}
+                        disabled={!externalProfileUrl}
+                        className="flex w-full items-center gap-2 disabled:cursor-default"
+                        title={externalProfileUrl || p.platform}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openExternalProfile(r);
+                        }}
+                      >
+                        <span
+                          className="flex h-4 w-4 items-center justify-center rounded-full border border-[var(--Light-Border-Subtle,#E6E6E6)] bg-white"
+                          style={{ borderWidth: "0.5px", padding: "0.125rem" }}
+                          aria-hidden="true"
+                        >
+                          <img src={PLATFORM_ICON_SRC[p.platform]} alt="" className="h-4 w-4" draggable={false} />
+                        </span>
+
+                        <span
+                          style={{
+                            color: "var(--Light-Text-Primary, #1A1A1A)",
+                            fontFamily: "Inter",
+                            fontSize: "0.75rem",
+                            fontWeight: 400,
+                            lineHeight: "1rem",
+                          }}
+                        >
+                          {formatCompact(p.followers)}
+                        </span>
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                <div
-                  className="flex items-center justify-center bg-white"
-                  style={{
-                    display: "flex",
-                    height: "5.5rem",
-                    padding: "0.625rem 1rem",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    gap: "0.5rem",
-                    borderRadius: "0 0.75rem 0.75rem 0",
-                    borderTop: `1px solid ${border}`,
-                    borderRight: `1px solid ${border}`,
-                    borderBottom: `1px solid ${border}`,
-                    background: "var(--Light-Background-Primary, #FFF)",
-                    boxSizing: "border-box",
-                    minWidth: "14.5rem",
-                  }}
-                >
-                  {renderActions ? renderActions(r) : null}
+                <div className="flex items-center justify-center px-4">
+                  <span
+                    className="truncate"
+                    style={{
+                      width: "100%",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      color: "var(--Light-Text-Secondary, #969696)",
+                      textAlign: "center",
+                      fontFamily: "var(--Font-Family-Inter, Inter)",
+                      fontSize: "var(--Font-Size-14, 0.875rem)",
+                      fontWeight: 400,
+                      lineHeight: "var(--Line-Height-20, 1.25rem)",
+                      letterSpacing: "var(--Letter-Spacing-0, 0)",
+                    }}
+                    title={appliedText}
+                  >
+                    {appliedText}
+                  </span>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      </XScroll>
+
+              <div
+                className="flex items-center justify-center bg-white"
+                style={{
+                  display: "flex",
+                  height: "5.5rem",
+                  padding: "0.625rem 1rem",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  borderRadius: "0 0.75rem 0.75rem 0",
+                  borderTop: `1px solid ${border}`,
+                  borderRight: `1px solid ${border}`,
+                  borderBottom: `1px solid ${border}`,
+                  background: "var(--Light-Background-Primary, #FFF)",
+                  boxSizing: "border-box",
+                  minWidth: "18rem",
+                }}
+              >
+                {renderActions ? renderActions(r) : null}
+              </div>
+            </div>
+          </RowXScroll>
+        );
+      })}
     </div>
   );
 }

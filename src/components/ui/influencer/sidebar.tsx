@@ -50,11 +50,11 @@ const ROUTES: Record<string, string> = {
   direct_invites: "/influencer/invitations",
 
   my_campaigns: "/influencer/my-campaigns",
-  my_campaigns_all: "/influencer/my-campaigns",
-  my_campaigns_applied: "/influencer/my-campaigns?tab=applied",
-  my_campaigns_active: "/influencer/my-campaigns?tab=active",
-  my_campaigns_completed: "/influencer/my-campaigns?tab=completed",
-  my_campaigns_rejected: "/influencer/my-campaigns?tab=rejected",
+  my_campaigns_all: "/influencer/my-campaigns/all",
+  my_campaigns_applied: "/influencer/my-campaigns/applied",
+  my_campaigns_active: "/influencer/my-campaigns/active",
+  my_campaigns_completed: "/influencer/my-campaigns/completed",
+  my_campaigns_rejected: "/influencer/my-campaigns/rejected",
 
   discover_campaigns: "/influencer/discover-campaigns",
   inbox: "/influencer/inbox",
@@ -850,27 +850,27 @@ export default function Sidebar({
           {
             key: "my_campaigns_all",
             label: "All Campaigns",
-            href: "/influencer/my-campaigns/all",
+            href: ROUTES.my_campaigns_all,
           },
           {
             key: "my_campaigns_applied",
             label: "Applied",
-            href: "/influencer/my-campaigns/applied",
+            href: ROUTES.my_campaigns_applied,
           },
           {
             key: "my_campaigns_active",
             label: "Active",
-            href: "/influencer/my-campaigns/active",
+            href: ROUTES.my_campaigns_active,
           },
           {
             key: "my_campaigns_completed",
             label: "Completed",
-            href: "/influencer/my-campaigns/completed",
+            href: ROUTES.my_campaigns_completed,
           },
           {
             key: "my_campaigns_rejected",
             label: "Rejected",
-            href: "/influencer/my-campaigns/rejected",
+            href: ROUTES.my_campaigns_rejected,
           },
         ],
       },
@@ -1068,8 +1068,8 @@ export default function Sidebar({
   }, [isDesktop, setDrawerOpen]);
 
   useEffect(() => {
-    const p = pathname || "";
-    const tab = searchParams?.get("tab");
+    const p = (pathname || "").replace(/\/+$/, "");
+    const tab = searchParams?.get("tab") || "";
 
     if (isSupportPath(p)) {
       setActive("help");
@@ -1077,14 +1077,23 @@ export default function Sidebar({
     }
 
     if (p === ROUTES.my_campaigns || p.startsWith(`${ROUTES.my_campaigns}/`)) {
-      const tabActiveMap: Record<string, string> = {
+      const slug =
+        p
+          .replace(ROUTES.my_campaigns, "")
+          .split("/")
+          .filter(Boolean)[0] ||
+        tab ||
+        "all";
+
+      const campaignActiveMap: Record<string, string> = {
+        all: "my_campaigns_all",
         applied: "my_campaigns_applied",
         active: "my_campaigns_active",
         completed: "my_campaigns_completed",
         rejected: "my_campaigns_rejected",
       };
 
-      setActive(tab ? tabActiveMap[tab] ?? "my_campaigns_all" : "my_campaigns_all");
+      setActive(campaignActiveMap[slug] ?? "my_campaigns_all");
 
       if (!(isDesktop && collapsed)) setMyCampaignOpen(true);
       return;

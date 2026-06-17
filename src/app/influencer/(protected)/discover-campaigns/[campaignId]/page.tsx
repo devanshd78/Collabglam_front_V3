@@ -4,27 +4,147 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   apiGetfetchCampaignbyId,
-  apiApplyToCampaign,
   getApiErrorMessage,
 } from "@/app/influencer/services/influencerApi";
 import { ArrowUpRight } from "lucide-react";
 import {
-  MoneyWavy,
   CalendarDots,
   CalendarX,
-  Wallet,
-  CaretDown,
   CaretLeft,
   CaretRight,
+  DotsThree,
   DownloadSimple,
+  EnvelopeSimple,
   FilePdf,
+  LinkSimple,
+  Wallet,
 } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/buttonComp";
 import Image from "next/image";
+import api from "@/lib/api";
 
-function asArray<T = any>(v: any): T[] {
-  if (!v) return [];
-  return Array.isArray(v) ? v : [v];
+const PAGE_WRAP =
+  "min-h-screen w-full bg-white px-4 pb-28 pt-8 sm:px-6 lg:px-10 xl:px-14";
+
+const CONTENT_WRAP = "mx-auto w-full max-w-[72.5rem]";
+
+const HERO_GRADIENT =
+  "linear-gradient(109deg, var(--Neutrals-0, #FFF) 28.8%, #FAFAFA 36.05%, rgba(255, 191, 0, 0.83) 50%, #F6BB2A 57.65%, #F3584E 74.04%, #E078D1 84.62%), var(--Light-Background-Subtle, #F9F9F9)";
+
+type BrandData = {
+  _id?: string;
+  brandId?: string;
+  brandName?: string;
+  name?: string;
+  email?: string;
+  proxyEmail?: string;
+  website?: string;
+  profilePic?: string;
+  industry?: string;
+  companySize?: string;
+  companyDetails?: string;
+  pocContact?: string;
+  currencyFormat?: string;
+  preferredLanguage?: string;
+  region?: string;
+};
+
+type InfluencerData = {
+  _id?: string;
+  influencerId?: string;
+  name?: string;
+  email?: string;
+  profilePic?: string;
+  hasApplied?: number;
+  hasApproved?: number;
+  isContracted?: number;
+  isAccepted?: number;
+  contractId?: string | null;
+  contractStatus?: string | null;
+  appliedAt?: string | null;
+};
+
+type CampaignFile = {
+  name?: string;
+  url?: string;
+  size?: number | string | null;
+  type?: string;
+};
+
+type CampaignImage = {
+  name?: string;
+  url?: string;
+  size?: number | string | null;
+  type?: string;
+};
+
+type CampaignTagRow = {
+  id?: string;
+  label?: string;
+  goal?: string;
+  type?: string;
+  name?: string;
+  title?: string;
+  value?: string;
+};
+
+type CampaignData = {
+  _id?: string;
+  campaignId?: string;
+  title?: string;
+  status?: string;
+  campaignStatus?: string;
+  productUrl?: string;
+  description?: string;
+  additionalNotes?: string;
+
+  campaignGoalIds?: string[];
+  campaignGoalDetails?: CampaignTagRow[];
+  campaignGoalRows?: CampaignTagRow[];
+  campaignGoals?: string[];
+
+  campaignType?: string;
+  campaignTypeRows?: CampaignTagRow[];
+  campaignTypes?: string[];
+
+  category?: string[];
+  subcategory?: string[];
+
+  payout?: {
+    currency?: string;
+    min?: number;
+    max?: number;
+  };
+
+  startAt?: string | null;
+  endAt?: string | null;
+  paymentType?: string;
+  numberOfInfluencers?: number;
+  influencerTier?: string[];
+  contentLanguage?: string[];
+  contentFormat?: string[];
+  minFollowers?: number;
+  maxFollowers?: number;
+  hashtags?: string[];
+  targetPlatforms?: string[];
+  targetCountries?: string[];
+  targetAgeGroups?: string[];
+  videoReferenceUrl?: string;
+  productImages?: CampaignImage[];
+  brandGuideline?: CampaignFile | null;
+  appliedInfluencerCount?: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+type CampaignViewData = {
+  brand: BrandData;
+  influencer: InfluencerData;
+  campaign: CampaignData;
+};
+
+function asArray<T = any>(value: any): T[] {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 function normalizeMongoId(id: any): string {
@@ -32,32 +152,337 @@ function normalizeMongoId(id: any): string {
   if (typeof id === "string" || typeof id === "number") return String(id);
 
   if (typeof id === "object") {
-    if (typeof (id as any).toHexString === "function") return (id as any).toHexString();
-    if (typeof (id as any).$oid === "string") return (id as any).$oid;
-    if (typeof (id as any).oid === "string") return (id as any).oid;
-    if (typeof (id as any).id === "string" || typeof (id as any).id === "number") {
-      return String((id as any).id);
+    if (typeof id.toHexString === "function") return id.toHexString();
+    if (typeof id.$oid === "string") return id.$oid;
+    if (typeof id.oid === "string") return id.oid;
+
+    if (typeof id.id === "string" || typeof id.id === "number") {
+      return String(id.id);
     }
-    if ((id as any)._id != null) return normalizeMongoId((id as any)._id);
-    if (typeof (id as any).toString === "function") {
-      const s = (id as any).toString();
-      if (s && s !== "[object Object]") return s;
+
+    if (id._id != null) return normalizeMongoId(id._id);
+
+    if (typeof id.toString === "function") {
+      const value = id.toString();
+
+      if (value && value !== "[object Object]") return value;
     }
   }
 
   return "";
 }
 
-const PAGE_WRAP =
-  "flex w-full flex-col items-start gap-7 px-4 py-6 sm:px-6 lg:px-10 xl:px-14";
+function pickString(...values: any[]) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
 
-function pad2(n: number) {
-  const x = Math.max(0, Math.floor(Number.isFinite(n) ? n : 0));
-  return String(x).padStart(2, "0");
+    const text = String(value).trim();
+    if (text) return text;
+  }
+
+  return "";
 }
 
-function plural(n: number, unit: string) {
-  return `${n} ${unit}${n === 1 ? "" : "s"}`;
+function isObjectIdLike(value: any) {
+  return /^[a-f0-9]{24}$/i.test(String(value || "").trim());
+}
+
+function toTitleLabel(value: any) {
+  const text = String(value || "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+
+  if (!text || isObjectIdLike(text)) return "";
+
+  return text
+    .split(" ")
+    .map((word) =>
+      word.length <= 2
+        ? word.toUpperCase()
+        : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    )
+    .join(" ");
+}
+
+function getTagLabel(item: any) {
+  if (item === null || item === undefined) return "";
+
+  if (typeof item === "string" || typeof item === "number") {
+    return String(item).trim();
+  }
+
+  if (typeof item === "object") {
+    return pickString(
+      item.label,
+      item.goal,
+      item.goalName,
+      item.campaignGoal,
+      item.campaignGoalName,
+      item.campaignType,
+      item.type,
+      item.name,
+      item.title,
+      item.value,
+      item.format,
+      item.language,
+      item.tier,
+      item.range,
+      item.countryNameEn,
+      item.countryName,
+      item.countryCode,
+      item.categoryName,
+      item.subcategoryName
+    );
+  }
+
+  return "";
+}
+
+function toDisplayTags(...inputs: any[]) {
+  const seen = new Set<string>();
+
+  return inputs
+    .flatMap((input) => asArray(input))
+    .flatMap((item) =>
+      typeof item === "string"
+        ? item.split(",").map((part) => part.trim())
+        : [getTagLabel(item)]
+    )
+    .map(toTitleLabel)
+    .filter(Boolean)
+    .filter((label) => {
+      const key = label.toLowerCase();
+
+      if (seen.has(key)) return false;
+
+      seen.add(key);
+      return true;
+    });
+}
+
+function removeTags(values: string[], removeValues: string[]) {
+  const removeSet = new Set(
+    removeValues.map((value) => value.trim().toLowerCase())
+  );
+
+  return values.filter((value) => !removeSet.has(value.trim().toLowerCase()));
+}
+
+function toNumber(value: any) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+
+  const parsed = Number(String(value ?? "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compactNumber(value: any) {
+  const num = toNumber(value);
+
+  if (!num) return "—";
+
+  return num.toLocaleString("en-US");
+}
+
+function currencySymbol(currency?: string) {
+  const code = String(currency || "USD").toUpperCase();
+
+  if (code === "USD") return "$";
+  if (code === "INR") return "₹";
+  if (code === "EUR") return "€";
+  if (code === "GBP") return "£";
+
+  return `${code} `;
+}
+
+function formatMoney(value: any, currency?: string) {
+  const num = toNumber(value);
+
+  if (!num) return "—";
+
+  return `${currencySymbol(currency)}${num.toLocaleString("en-US")}`;
+}
+
+function formatMoneyRange(minValue: any, maxValue: any, currency?: string) {
+  const min = toNumber(minValue);
+  const max = toNumber(maxValue);
+
+  if (min && max && min !== max) {
+    return `${formatMoney(min, currency)} - ${formatMoney(max, currency)}`;
+  }
+
+  if (max) return formatMoney(max, currency);
+  if (min) return formatMoney(min, currency);
+
+  return "—";
+}
+
+function formatDate(value: any) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatShortDate(value: any) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+  });
+}
+
+function formatPostedAgo(value: any) {
+  if (!value) return "Posted recently";
+
+  const created = new Date(value).getTime();
+
+  if (!Number.isFinite(created)) return "Posted recently";
+
+  const diffMs = Date.now() - created;
+  const minutes = Math.max(1, Math.floor(diffMs / 60_000));
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) return `Posted ${days} day${days === 1 ? "" : "s"} ago`;
+  if (hours > 0) return `Posted ${hours} hr${hours === 1 ? "" : "s"} ago`;
+
+  return `Posted ${minutes} min${minutes === 1 ? "" : "s"} ago`;
+}
+
+function formatFileSize(bytes: any) {
+  const size = Number(bytes);
+
+  if (!Number.isFinite(size) || size <= 0) return "";
+
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`;
+
+  return `${size} B`;
+}
+
+function normalizeAssetUrl(value: any) {
+  const url = String(value || "").trim();
+
+  if (!url) return "";
+  if (/^(https?:|data:|blob:)/i.test(url)) return url;
+  if (url.startsWith("//")) return `https:${url}`;
+
+  return url;
+}
+
+function getYoutubeId(url: string) {
+  try {
+    const parsed = new URL(url);
+
+    if (parsed.hostname.includes("youtu.be")) {
+      return parsed.pathname.replace("/", "") || "";
+    }
+
+    if (parsed.hostname.includes("youtube.com")) {
+      const videoId = parsed.searchParams.get("v");
+
+      if (videoId) return videoId;
+
+      const parts = parsed.pathname.split("/").filter(Boolean);
+      const shortsIndex = parts.indexOf("shorts");
+
+      if (shortsIndex >= 0 && parts[shortsIndex + 1]) {
+        return parts[shortsIndex + 1];
+      }
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+}
+
+function getVideoThumb(url: string) {
+  const id = getYoutubeId(url);
+
+  return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : "";
+}
+
+function Pill({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex h-7 items-center justify-center rounded-[1.25rem] bg-[#F9F9F9] px-3 text-[0.75rem] font-semibold leading-5 text-[#1A1A1A]">
+      {children}
+    </span>
+  );
+}
+
+function Card({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={[
+        "rounded-[0.75rem] border border-[#E6E6E6] bg-white",
+        className,
+      ].join(" ")}
+    >
+      {children}
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="text-[1.25rem] font-semibold leading-7 text-[#1A1A1A]">
+      {children}
+    </h2>
+  );
+}
+
+function EmptyValue() {
+  return <span className="text-[0.875rem] leading-5 text-[#969696]">—</span>;
+}
+
+function LineWiseTags({
+  values,
+  variant = "text",
+}: {
+  values: string[];
+  variant?: "text" | "pill";
+}) {
+  if (!values.length) return <EmptyValue />;
+
+  return (
+    <div className="mt-4 flex flex-col items-start gap-2">
+      {values.map((value, index) => {
+        if (variant === "pill") {
+          return <Pill key={`${value}-${index}`}>{value}</Pill>;
+        }
+
+        return (
+          <span
+            key={`${value}-${index}`}
+            className="block text-[0.875rem] font-semibold leading-5 text-[#1A1A1A]"
+          >
+            {value}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 function TagCard({
@@ -68,115 +493,352 @@ function TagCard({
   values: string[];
 }) {
   return (
-    <div className="flex flex-1 flex-col items-start gap-[1.3125rem] self-stretch rounded-[0.75rem] border border-[#E6E6E6] bg-white p-3">
-      <div className="self-stretch text-[#1A1A1A] text-[0.75rem] font-semibold leading-[1.25rem]">
+    <Card className="flex min-h-[8rem] flex-col items-start gap-5 p-4">
+      <div className="text-[0.75rem] font-semibold leading-5 text-[#1A1A1A]">
         {title}
       </div>
 
-      <div className="flex flex-wrap items-start gap-2 self-stretch">
+      <div className="flex flex-wrap gap-2">
         {values.length ? (
-          values.map((value, idx) => (
-            <span
-              key={`${title}-${value}-${idx}`}
-              className="flex h-7 items-center justify-center rounded-[1.25rem] bg-[#F9F9F9] px-3"
-            >
-              <span className="text-[#1A1A1A] text-[0.75rem] font-medium leading-[1.25rem]">
-                {value}
-              </span>
-            </span>
+          values.map((value, index) => (
+            <Pill key={`${title}-${value}-${index}`}>{value}</Pill>
           ))
         ) : (
-          <span className="text-[#969696] text-[0.875rem] leading-[1.25rem]">—</span>
+          <EmptyValue />
         )}
+      </div>
+    </Card>
+  );
+}
+
+function StatRow({
+  icon,
+  value,
+  label,
+}: {
+  icon: React.ReactNode;
+  value: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white">
+        {icon}
+      </div>
+
+      <div className="min-w-0">
+        <div className="text-[1rem] font-semibold leading-6 text-[#1A1A1A]">
+          {value}
+        </div>
+        <div className="text-[0.75rem] font-normal leading-4 text-[#B8B8B8]">
+          {label}
+        </div>
       </div>
     </div>
   );
 }
 
-function getYoutubeId(url: string) {
-  try {
-    const u = new URL(url);
-    if (u.hostname.includes("youtu.be")) return u.pathname.replace("/", "") || "";
-    if (u.hostname.includes("youtube.com")) {
-      const v = u.searchParams.get("v");
-      if (v) return v;
-      const parts = u.pathname.split("/").filter(Boolean);
-      const idx = parts.indexOf("shorts");
-      if (idx >= 0 && parts[idx + 1]) return parts[idx + 1];
-    }
-  } catch { }
-  return "";
-}
-
-function getVideoThumb(url: string) {
-  const id = getYoutubeId(url);
-  return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : "";
-}
-
-const statuses = [
-  { label: "Active", dot: "bg-[#28A745]", ring: "bg-[#BCE4C5]" },
-  { label: "Paused", dot: "bg-[#DC3545]", ring: "bg-[#F5C6CB]" },
-  { label: "Draft", dot: "bg-[#9E9E9E]", ring: "bg-[#E0E0E0]" },
-  { label: "Completed", dot: "bg-[#F07B3F]", ring: "bg-[#FAD6C0]" },
-];
-
-function StatusDot({ dot, ring }: { dot: string; ring: string }) {
+function InfoTile({
+  icon,
+  label,
+  value,
+  children,
+}: {
+  icon?: React.ReactNode;
+  label: string;
+  value?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
   return (
-    <span className={`inline-flex items-center justify-center rounded-full p-[0.125rem] ${ring}`}>
-      <span className={`h-[0.5rem] w-[0.5rem] rounded-full ${dot}`} />
-    </span>
+    <Card className="flex min-h-[12.375rem] flex-col items-start p-3">
+      {icon ? (
+        <div className="flex h-12 w-12 items-center justify-center rounded-[0.5rem] bg-[#F2F2F2]">
+          {icon}
+        </div>
+      ) : null}
+
+      <div className="mt-auto flex w-full flex-col gap-2">
+        <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
+          {label}
+        </div>
+
+        {children ?? (
+          <div className="text-[1rem] font-medium leading-6 text-[#1A1A1A]">
+            {value || "—"}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
-function CampaignStatusBadge({ status }: { status: string }) {
-  const current =
-    statuses.find((s) => s.label.toLowerCase() === String(status).toLowerCase()) ?? null;
+function PlatformIcon({ platform }: { platform: string }) {
+  const lower = platform.toLowerCase();
+
+  if (lower.includes("instagram")) {
+    return (
+      <Image
+        src="/skill-icons_instagram.svg"
+        alt="Instagram"
+        width={20}
+        height={20}
+        className="h-5 w-5"
+      />
+    );
+  }
+
+  if (lower.includes("youtube")) {
+    return (
+      <Image
+        src="/logos_youtube-icon.svg"
+        alt="YouTube"
+        width={20}
+        height={20}
+        className="h-5 w-5"
+      />
+    );
+  }
+
+  if (lower.includes("tiktok")) {
+    return (
+      <Image
+        src="/ic_baseline-tiktok.svg"
+        alt="TikTok"
+        width={20}
+        height={20}
+        className="h-5 w-5"
+      />
+    );
+  }
+
+  return <Pill>{platform}</Pill>;
+}
+
+function PdfAttachmentCard({
+  name,
+  size,
+  onDownload,
+}: {
+  name: string;
+  size?: string;
+  onDownload: () => void;
+}) {
+  return (
+    <Card className="flex min-h-[5rem] items-center justify-between gap-4 p-4">
+      <div className="flex min-w-0 items-center gap-3">
+        <FilePdf
+          weight="fill"
+          className="h-8 w-8 shrink-0 text-[#F04438]"
+        />
+
+        <div className="min-w-0">
+          <div className="truncate text-[1rem] font-medium leading-6 text-[#1A1A1A]">
+            {name || "Brandguideline.pdf"}
+          </div>
+
+          {size ? (
+            <div className="text-[0.875rem] font-normal leading-5 text-[#969696]">
+              {size}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onDownload}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[0.5rem] text-[#1A1A1A] transition hover:bg-[#F9F9F9]"
+        aria-label="Download file"
+      >
+        <DownloadSimple weight="bold" className="h-4 w-4" />
+      </button>
+    </Card>
+  );
+}
+
+function CreatorRequirementGrid({
+  numberOfInfluencers,
+  influencerTier,
+  contentLanguage,
+  contentFormat,
+  minFollowers,
+  maxFollowers,
+}: {
+  numberOfInfluencers: string;
+  influencerTier: string;
+  contentLanguage: string;
+  contentFormat: string[];
+  minFollowers: string;
+  maxFollowers: string;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="grid grid-cols-1 divide-y divide-[#E6E6E6] md:grid-cols-3 md:divide-x md:divide-y-0">
+        <div className="p-4">
+          <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
+            Number of influencers
+          </div>
+          <div className="mt-3 text-[1rem] font-medium leading-6 text-[#1A1A1A]">
+            {numberOfInfluencers}
+          </div>
+        </div>
+
+        <div className="p-4">
+          <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
+            Influencer Tier
+          </div>
+          <div className="mt-3 text-[1rem] font-medium leading-6 text-[#1A1A1A]">
+            {influencerTier}
+          </div>
+        </div>
+
+        <div className="p-4">
+          <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
+            Content Language
+          </div>
+          <div className="mt-3 text-[1rem] font-medium leading-6 text-[#1A1A1A]">
+            {contentLanguage}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 divide-y divide-[#E6E6E6] border-t border-[#E6E6E6] md:grid-cols-3 md:divide-x md:divide-y-0">
+        <div className="p-4">
+          <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
+            Content Format
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {contentFormat.length ? (
+              contentFormat.map((format, index) => (
+                <Pill key={`${format}-${index}`}>{format}</Pill>
+              ))
+            ) : (
+              <EmptyValue />
+            )}
+          </div>
+        </div>
+
+        <div className="p-4">
+          <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
+            Min Followers
+          </div>
+          <div className="mt-3 text-[1rem] font-medium leading-6 text-[#1A1A1A]">
+            {minFollowers}{" "}
+            <span className="text-[0.75rem] text-[#969696]">(min)</span>
+          </div>
+        </div>
+
+        <div className="p-4">
+          <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
+            Max Followers
+          </div>
+          <div className="mt-3 text-[1rem] font-medium leading-6 text-[#1A1A1A]">
+            {maxFollowers}{" "}
+            <span className="text-[0.75rem] text-[#969696]">(max)</span>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ImagePreviewModal({
+  images,
+  activeIndex,
+  onClose,
+  onPrev,
+  onNext,
+}: {
+  images: string[];
+  activeIndex: number;
+  onClose: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const activeImage = images[activeIndex] || "";
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+      if (event.key === "ArrowLeft") onPrev();
+      if (event.key === "ArrowRight") onNext();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose, onPrev, onNext]);
+
+  if (!activeImage) return null;
 
   return (
-    <div className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#E6E6E6] bg-white px-2">
-      {current ? <StatusDot dot={current.dot} ring={current.ring} /> : null}
-      <span className="capitalize text-sm font-medium text-[#1A1A1A]">
-        {status || "draft"}
-      </span>
+    <div
+      className="fixed inset-0 z-[9999] flex min-h-screen items-center justify-center bg-[#B3B3B3]/95 px-6 py-20"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Image preview"
+      onClick={onClose}
+    >
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClose();
+        }}
+        className="absolute right-8 top-8 flex h-12 w-12 items-center justify-center rounded-full bg-[#D9D9D9] text-[2rem] font-light leading-none text-[#1A1A1A] transition hover:bg-white"
+        aria-label="Close preview"
+      >
+        ×
+      </button>
+
+      {images.length > 1 ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onPrev();
+          }}
+          className="absolute left-8 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-[#F2F2F2] text-[#1A1A1A] transition hover:bg-white"
+          aria-label="Previous image"
+        >
+          <CaretLeft weight="bold" className="h-5 w-5" />
+        </button>
+      ) : null}
+
+      <div
+        className="flex max-h-[72vh] w-full max-w-[46rem] items-center justify-center overflow-hidden rounded-[0.75rem] bg-white"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <img
+          src={activeImage}
+          alt="Campaign reference preview"
+          className="max-h-[72vh] w-full object-contain"
+          draggable={false}
+        />
+      </div>
+
+      {images.length > 1 ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onNext();
+          }}
+          className="absolute right-8 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-[#F2F2F2] text-[#1A1A1A] transition hover:bg-white"
+          aria-label="Next image"
+        >
+          <CaretRight weight="bold" className="h-5 w-5" />
+        </button>
+      ) : null}
     </div>
   );
-}
-function toTagValues(input: any): string[] {
-  const values = asArray(input)
-    .flatMap((item: any) => {
-      if (item == null) return [];
-
-      if (typeof item === "string" || typeof item === "number") {
-        return String(item)
-          .split(",")
-          .map((v) => v.trim())
-          .filter(Boolean);
-      }
-
-      if (typeof item === "object") {
-        const value =
-          item?.label ??
-          item?.name ??
-          item?.title ??
-          item?.value ??
-          item?.tag ??
-          item?.range ??
-          item?.categoryName ??
-          item?.subcategoryName ??
-          item?.subCategoryName ??
-          item?.goal ??
-          item?.goalName ??
-          item?.type ??
-          item?.campaignType;
-
-        return typeof value === "string" && value.trim() ? [value.trim()] : [];
-      }
-
-      return [];
-    })
-    .filter(Boolean);
-
-  return Array.from(new Set(values));
 }
 
 export default function ViewCampaignPage() {
@@ -193,47 +855,16 @@ export default function ViewCampaignPage() {
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [doc, setDoc] = useState<any | null>(null);
+  const [viewData, setViewData] = useState<CampaignViewData | null>(null);
 
   const [influencerId, setInfluencerId] = useState("");
   const [token, setToken] = useState("");
+  const [isOpeningThread, setIsOpeningThread] = useState(false);
 
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const [activeSlide, setActiveSlide] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(0);
-  const [isApplying, setIsApplying] = useState(false);
-  const [hasApplied, setHasApplied] = useState(false);
-
-  const handleApply = async () => {
-    if (!campaignId || !influencerId || isApplying || hasApplied) return;
-
-    try {
-      setIsApplying(true);
-
-      const res = await apiApplyToCampaign(
-        {
-          campaignId,
-          influencerId,
-        },
-        token || undefined
-      );
-
-      setHasApplied(Number(res?.hasApplied ?? 0) === 1);
-      setDoc((prev: any) =>
-        prev
-          ? {
-            ...prev,
-            hasApplied: 1,
-            applicantCount: res?.applicantCount ?? prev?.applicantCount,
-          }
-          : prev
-      );
-    } catch (e) {
-      setErr(getApiErrorMessage(e, "Failed to apply to campaign"));
-    } finally {
-      setIsApplying(false);
-    }
-  };
+const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
   useEffect(() => {
     const id =
@@ -256,31 +887,32 @@ export default function ViewCampaignPage() {
     }
   }, []);
 
-
   useEffect(() => {
     const desktopMq = window.matchMedia("(min-width: 1024px)");
     let ro: ResizeObserver | null = null;
 
     const update = () => {
-      // only offset on desktop
       if (!desktopMq.matches) {
         setSidebarWidth(0);
         return;
       }
 
-      const sidebar = document.querySelector("[data-cg-sidebar]") as HTMLElement | null;
+      const sidebar = document.querySelector(
+        "[data-cg-sidebar]"
+      ) as HTMLElement | null;
 
       if (!sidebar) {
         setSidebarWidth(0);
         return;
       }
 
-      const width = sidebar.getBoundingClientRect().width;
-      setSidebarWidth(Math.round(width));
+      setSidebarWidth(Math.round(sidebar.getBoundingClientRect().width));
     };
 
     const attachObserver = () => {
-      const sidebar = document.querySelector("[data-cg-sidebar]") as HTMLElement | null;
+      const sidebar = document.querySelector(
+        "[data-cg-sidebar]"
+      ) as HTMLElement | null;
 
       if (ro) {
         ro.disconnect();
@@ -300,14 +932,15 @@ export default function ViewCampaignPage() {
     window.addEventListener("resize", attachObserver);
     desktopMq.addEventListener?.("change", attachObserver);
 
-    // sidebar may mount after this component
     const raf1 = requestAnimationFrame(attachObserver);
     const raf2 = requestAnimationFrame(attachObserver);
 
     return () => {
       window.removeEventListener("resize", attachObserver);
       desktopMq.removeEventListener?.("change", attachObserver);
+
       if (ro) ro.disconnect();
+
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };
@@ -329,21 +962,20 @@ export default function ViewCampaignPage() {
           token || undefined
         );
 
-        const payload =
-          res?.data?.doc ??
-          res?.data?.data?.doc ??
-          res?.data?.campaign ??
-          res?.data?.data ??
-          res?.doc ??
-          res ??
-          null;
+        const payload = res?.data?.data ?? res?.data ?? res;
+
+        const nextData: CampaignViewData = {
+          brand: payload?.brand ?? {},
+          influencer: payload?.influencer ?? {},
+          campaign: payload?.campaign ?? {},
+        };
 
         if (!cancelled) {
-          setDoc(payload);
+          setViewData(nextData);
         }
-      } catch (e) {
+      } catch (error) {
         if (!cancelled) {
-          setErr(getApiErrorMessage(e, "Failed to load campaign"));
+          setErr(getApiErrorMessage(error, "Failed to load campaign"));
         }
       } finally {
         if (!cancelled) {
@@ -358,19 +990,25 @@ export default function ViewCampaignPage() {
       cancelled = true;
     };
   }, [influencerId, campaignId, token]);
-  useEffect(() => {
-    setHasApplied(Number((doc as any)?.hasApplied ?? 0) === 1);
-  }, [doc]);
 
   if (loading) {
     return (
       <div className={PAGE_WRAP}>
-        <div className="w-full rounded-2xl border bg-white p-6 shadow-sm">
-          <div className="h-6 w-64 animate-pulse rounded bg-gray-200" />
-          <div className="mt-3 h-4 w-96 animate-pulse rounded bg-gray-200" />
-          <div className="mt-6 grid gap-3 md:grid-cols-2">
-            <div className="h-40 animate-pulse rounded-2xl bg-gray-100" />
-            <div className="h-40 animate-pulse rounded-2xl bg-gray-100" />
+        <div className={CONTENT_WRAP}>
+          <div className="overflow-hidden rounded-[0.75rem] border border-[#E6E6E6] bg-white">
+            <div
+              className="h-[8.5rem] w-full animate-pulse"
+              style={{ background: HERO_GRADIENT }}
+            />
+
+            <div className="p-6">
+              <div className="h-6 w-72 animate-pulse rounded bg-gray-200" />
+              <div className="mt-3 h-4 w-96 animate-pulse rounded bg-gray-200" />
+              <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_20.75rem]">
+                <div className="h-72 animate-pulse rounded-[0.75rem] bg-gray-100" />
+                <div className="h-72 animate-pulse rounded-[0.75rem] bg-gray-100" />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -380,904 +1018,731 @@ export default function ViewCampaignPage() {
   if (err) {
     return (
       <div className={PAGE_WRAP}>
-        <div className="w-full rounded-2xl border bg-white p-6 shadow-sm">
-          <div className="text-lg font-semibold">Couldn’t load campaign</div>
-          <p className="mt-2 text-sm text-red-600">{err}</p>
+        <div className={CONTENT_WRAP}>
+          <Card className="p-6">
+            <div className="text-lg font-semibold text-[#1A1A1A]">
+              Couldn’t load campaign
+            </div>
 
-          <div className="mt-4 flex gap-2">
-            <Button
-              variant="raised"
-              size="sm"
-              className="my-0 rounded-xl border border-[#E6E6E6] bg-white px-4 py-2 text-sm shadow-none"
-              onClick={() => router.refresh()}
-            >
-              Retry
-            </Button>
+            <p className="mt-2 text-sm text-red-600">{err}</p>
 
-            <Button
-              variant="raised"
-              size="sm"
-              className="my-0 rounded-xl border border-[#E6E6E6] bg-white px-4 py-2 text-sm shadow-none"
-              onClick={() => router.back()}
-            >
-              Go back
-            </Button>
-          </div>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => router.refresh()}
+                className="rounded-xl border border-[#E6E6E6] bg-white px-4 py-2 text-sm font-semibold text-[#1A1A1A]"
+              >
+                Retry
+              </button>
+
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="rounded-xl border border-[#E6E6E6] bg-white px-4 py-2 text-sm font-semibold text-[#1A1A1A]"
+              >
+                Go back
+              </button>
+            </div>
+          </Card>
         </div>
       </div>
     );
   }
 
-  if (!doc) {
+  if (!viewData) {
     return (
       <div className={PAGE_WRAP}>
-        <div className="w-full rounded-2xl border bg-white p-6 shadow-sm">
-          <div className="text-lg font-semibold">No campaign found</div>
+        <div className={CONTENT_WRAP}>
+          <Card className="p-6">
+            <div className="text-lg font-semibold text-[#1A1A1A]">
+              No campaign found
+            </div>
+          </Card>
         </div>
       </div>
     );
   }
 
-  const details = (doc as any)?.details ?? {};
-  const countries = asArray(details?.targetCountries);
-  const ages = asArray(details?.targetAgeRanges);
-  const platforms = asArray<string>((doc as any)?.platformSelection);
+  const brand = viewData.brand;
+  const influencer = viewData.influencer;
+  const campaign = viewData.campaign;
 
-  const descriptionText = String(
-    (doc as any)?.description ??
-    (doc as any)?.campaignDescription ??
-    details?.description ??
-    details?.campaignDescription ??
-    ""
-  ).trim();
+  const campaignTitle = pickString(campaign.title, "Campaign");
+  const brandName = pickString(brand.brandName, brand.name, "Brand");
+  const postedText = formatPostedAgo(campaign.createdAt ?? campaign.updatedAt);
+  const productUrl = pickString(campaign.productUrl);
+  const logoUrl = normalizeAssetUrl(brand.profilePic);
+  const descriptionText = pickString(campaign.description);
+  const additionalNotesText = pickString(campaign.additionalNotes);
 
-  const additionalNotesText = String(
-    (doc as any)?.additionalNotes ??
-    (doc as any)?.notes ??
-    (doc as any)?.additionalInformation ??
-    details?.additionalNotes ??
-    details?.notes ??
-    details?.additionalInformation ??
-    ""
-  ).trim();
+  const payoutText = formatMoneyRange(
+    campaign.payout?.min,
+    campaign.payout?.max,
+    campaign.payout?.currency
+  );
 
-  const hashtags = (() => {
-    const detailObjs = asArray((details as any)?.preferredHashtags ?? []);
+  const startDateText = formatDate(campaign.startAt);
+  const endDateText = formatDate(campaign.endAt);
+  const shortStartDateText = formatShortDate(campaign.startAt);
+  const shortEndDateText = formatShortDate(campaign.endAt);
+  const paymentTypeText = pickString(campaign.paymentType, "—");
 
-    const byId = new Map<string, string>();
-    detailObjs.forEach((h: any) => {
-      const key = normalizeMongoId(h?.id ?? h?._id);
-      const tag = typeof h?.tag === "string" ? h.tag.trim() : "";
-      if (key && tag) byId.set(key, tag);
-    });
+  const hasAppliedValue = Number(influencer.hasApplied ?? 0);
+  const appliedCount = toNumber(campaign.appliedInfluencerCount);
 
-    const raw =
-      (doc as any)?.preferredHashtags ??
-      (details as any)?.preferredHashtags ??
-      (doc as any)?.hashtags ??
-      (details as any)?.hashtags ??
-      [];
+  const categoryTags = toDisplayTags(campaign.category);
+  const subcategoryTags = toDisplayTags(campaign.subcategory);
 
-    return asArray(raw)
-      .map((h: any) => {
-        if (typeof h === "string") {
-          const s = h.trim();
-          if (byId.has(s)) return byId.get(s)!;
-          if (/^[a-f0-9]{24}$/i.test(s)) return "";
-          return s;
-        }
+  const campaignGoalTags = removeTags(
+    toDisplayTags(
+      campaign.campaignGoalRows,
+      campaign.campaignGoalDetails,
+      campaign.campaignGoals
+    ),
+    [...categoryTags, ...subcategoryTags]
+  );
 
-        if (h && typeof h.tag === "string") return h.tag.trim();
-        return "";
-      })
-      .filter(Boolean);
-  })();
+  const campaignTypeTags = removeTags(
+    toDisplayTags(
+      campaign.campaignTypeRows,
+      campaign.campaignType,
+      campaign.campaignTypes
+    ),
+    [...categoryTags, ...subcategoryTags, ...campaignGoalTags]
+  );
 
-  const productImages = asArray<any>((doc as any)?.productImages);
+  const hashtags = toDisplayTags(campaign.hashtags);
+  const targetCountries = toDisplayTags(campaign.targetCountries);
+  const targetAgeGroups = toDisplayTags(campaign.targetAgeGroups);
+  const targetPlatforms = toDisplayTags(campaign.targetPlatforms);
+  const contentFormat = toDisplayTags(campaign.contentFormat);
 
-  const videoReferenceUrl = String(
-    (doc as any)?.videoReference ??
-    (doc as any)?.videoReferenceUrl ??
-    (doc as any)?.referenceVideoUrl ??
-    (doc as any)?.videoUrl ??
-    details?.videoReference ??
-    details?.videoReferenceUrl ??
-    details?.referenceVideoUrl ??
-    details?.videoUrl ??
-    ""
-  ).trim();
+  const numberOfInfluencers = compactNumber(campaign.numberOfInfluencers);
+  const influencerTier = toDisplayTags(campaign.influencerTier).join(", ");
+  const contentLanguage = toDisplayTags(campaign.contentLanguage).join(", ");
+  const minFollowers = compactNumber(campaign.minFollowers);
+  const maxFollowers = compactNumber(campaign.maxFollowers);
 
-  const videoThumbUrl = videoReferenceUrl ? getVideoThumb(videoReferenceUrl) : "";
-
-  const pdfRaw =
-    (doc as any)?.pdf ??
-    (doc as any)?.pdfAttachment ??
-    (doc as any)?.attachment ??
-    (doc as any)?.attachments ??
-    details?.pdf ??
-    details?.pdfAttachment ??
-    details?.attachment ??
-    details?.attachments ??
-    null;
-
-  const pdfItem = Array.isArray(pdfRaw) ? pdfRaw[0] : pdfRaw;
-
-  const pdfUrl =
-    typeof pdfItem === "string"
-      ? pdfItem
-      : pdfItem?.url || pdfItem?.src || pdfItem?.path || "";
-
-  const pdfName =
-    typeof pdfItem === "object" && pdfItem?.name
-      ? String(pdfItem.name)
-      : pdfUrl
-        ? "Attachment.pdf"
-        : "";
-
-  const pdfSizeBytes =
-    typeof pdfItem === "object" && pdfItem?.size != null ? Number(pdfItem.size) : NaN;
-
-  const pdfSizeText =
-    Number.isFinite(pdfSizeBytes) && pdfSizeBytes > 0
-      ? `${(pdfSizeBytes / (1024 * 1024)).toFixed(1)} MB`
-      : "";
-
-  const targetCountryText = countries.length
-    ? countries
-      .map((c: any) =>
-        `${String(c?.flag ?? "")} ${String(c?.countryName ?? c?.countryCode ?? "").trim()}`.trim()
-      )
-      .filter(Boolean)
-      .join(", ")
-    : "—";
-
-  const productUrlRaw =
-    details?.productUrl ??
-    details?.productLink ??
-    (doc as any)?.productUrl ??
-    (doc as any)?.productLink ??
-    "";
-
-  const productUrl = typeof productUrlRaw === "string" ? productUrlRaw : "";
-
-  const logoUrlRaw =
-    (doc as any)?.brandLogoUrl ??
-    (doc as any)?.brandLogo ??
-    details?.brandLogoUrl ??
-    details?.brandLogo ??
-    "";
-
-  const logoUrl = typeof logoUrlRaw === "string" ? logoUrlRaw : "";
-
-  const totalInfluencers =
-    Number((doc as any)?.numberOfInfluencers ?? details?.numberOfInfluencers ?? 0) || 0;
-
-  const selectedList =
-    (doc as any)?.selectedInfluencers ??
-    (doc as any)?.selectedInfluencerIds ??
-    (doc as any)?.selectedCreators ??
-    (doc as any)?.selectedInfluencer ??
-    details?.selectedInfluencers ??
-    details?.selectedInfluencerIds ??
-    [];
-
-  const selectedCount = asArray(selectedList).length;
-
-  const startAt = (doc as any)?.startAt ?? details?.startAt ?? null;
-  const endAt = (doc as any)?.endAt ?? details?.endAt ?? null;
-
-  let timelineText = "—";
-  try {
-    if (startAt && endAt) {
-      const a = new Date(startAt).getTime();
-      const b = new Date(endAt).getTime();
-      if (Number.isFinite(a) && Number.isFinite(b) && b > a) {
-        const days = Math.ceil((b - a) / 86400000);
-        const months = Math.max(1, Math.round(days / 30));
-        timelineText = plural(months, "month");
-      }
-    } else if ((doc as any)?.timeline) {
-      timelineText = String((doc as any)?.timeline);
-    }
-  } catch { }
-
-  const currency =
-    String((doc as any)?.currency ?? details?.currency ?? (doc as any)?.budgetCurrency ?? "USD") ||
-    "USD";
-
-  const budgetRaw =
-    (doc as any)?.campaignBudget ?? details?.campaignBudget ?? (doc as any)?.totalBudget ?? null;
-
-  const budgetNum =
-    typeof budgetRaw === "number"
-      ? budgetRaw
-      : Number(String(budgetRaw ?? "").replace(/[^0-9.]/g, ""));
-
-  const budgetText =
-    Number.isFinite(budgetNum) && budgetNum > 0
-      ? `${currency} ${budgetNum.toLocaleString("en-US")}`
-      : "—";
-
-  const statusText = String((doc as any)?.status ?? "—");
-
-  const startDateText = startAt
-    ? new Date(startAt).toLocaleDateString("en-IN", { dateStyle: "medium" })
-    : "—";
-
-  const endDateText = endAt
-    ? new Date(endAt).toLocaleDateString("en-IN", { dateStyle: "medium" })
-    : "—";
-
-  const paymentTypeText = String((doc as any)?.paymentType ?? details?.paymentType ?? "—");
-
-  const hasAppliedValue = Number((doc as any)?.hasApplied ?? 0);
-  const showApplyButton = hasAppliedValue === 0;
-
-
-  const categoryTags = (() => {
-    const fromDetails = details?.category?.name ? [String(details.category.name).trim()] : [];
-
-    const fromCategories = asArray((doc as any)?.categories)
-      .map((item: any) => String(item?.categoryName ?? "").trim())
-      .filter(Boolean);
-
-    const fromRaw = toTagValues(
-      (doc as any)?.campaignCategory ??
-      (doc as any)?.category ??
-      (doc as any)?.categories ??
-      []
-    );
-
-    return Array.from(new Set([...fromDetails, ...fromCategories, ...fromRaw]));
-  })();
-
-  const subcategoryTags = (() => {
-    const fromDetails = asArray(details?.subcategories)
-      .map((item: any) => String(item?.name ?? "").trim())
-      .filter(Boolean);
-
-    const fromCategories = asArray((doc as any)?.categories)
-      .map((item: any) => String(item?.subcategoryName ?? "").trim())
-      .filter(Boolean);
-
-    const fromRaw = toTagValues(
-      (doc as any)?.campaignSubcategory ??
-      (doc as any)?.subcategory ??
-      (doc as any)?.subCategory ??
-      (doc as any)?.subcategories ??
-      (doc as any)?.subCategories ??
-      []
-    );
-
-    return Array.from(new Set([...fromDetails, ...fromCategories, ...fromRaw]));
-  })();
-
-  const campaignTypeTags = (() => {
-    return Array.from(
-      new Set(
-        toTagValues(
-          (doc as any)?.campaignType ??
-          (doc as any)?.campaignTypes ??
-          details?.campaignType ??
-          details?.campaignTypes ??
-          []
-        )
-      )
-    );
-  })();
-
-  const campaignGoalTags = (() => {
-    const detailGoals = asArray(details?.campaignGoals ?? []);
-
-    const goalById = new Map<string, string>();
-    detailGoals.forEach((goal: any) => {
-      const id = normalizeMongoId(goal?.id ?? goal?._id);
-      const label = String(goal?.goal ?? goal?.name ?? goal?.label ?? "").trim();
-      if (id && label) goalById.set(id, label);
-    });
-
-    const rawGoals =
-      (doc as any)?.campaignGoals ??
-      (doc as any)?.campaignGoal ??
-      details?.campaignGoals ??
-      details?.campaignGoal ??
-      [];
-
-    const resolved = asArray(rawGoals)
-      .map((goal: any) => {
-        if (typeof goal === "string") {
-          const s = goal.trim();
-          return goalById.get(s) ?? s;
-        }
-
-        if (goal && typeof goal === "object") {
-          const id = normalizeMongoId(goal?.id ?? goal?._id);
-          return (
-            String(goal?.goal ?? goal?.name ?? goal?.label ?? "").trim() ||
-            goalById.get(id) ||
-            ""
-          );
-        }
-
-        return "";
-      })
-      .filter(Boolean);
-
-    return Array.from(new Set(resolved));
-  })();
-
-  const lorem10 = "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do.";
-
-  const backendImageUrls = (productImages ?? [])
-    .map((img: any) => img?.url || img?.src || img?.path || "")
+  const carouselImages = asArray<CampaignImage>(campaign.productImages)
+    .map((image) => normalizeAssetUrl(image.url))
     .filter(Boolean);
 
-  const carouselImages = productImages
-    .map((img: any, idx: number) => {
-      if (typeof img === "string") {
-        return {
-          src: img,
-          alt: `Campaign image ${idx + 1}`,
-        };
-      }
+    const openImagePreview = (index: number) => {
+  setPreviewIndex(index);
+};
 
-      const src =
-        img?.dataUrl ||
-        img?.url ||
-        img?.src ||
-        img?.path ||
-        "";
+const closeImagePreview = () => {
+  setPreviewIndex(null);
+};
 
-      if (!src) return null;
+const showPreviousPreviewImage = () => {
+  setPreviewIndex((current) => {
+    if (current === null || carouselImages.length === 0) return current;
+    return current <= 0 ? carouselImages.length - 1 : current - 1;
+  });
+};
 
-      return {
-        src,
-        alt: String(img?.name || `Campaign image ${idx + 1}`),
-      };
-    })
-    .filter(Boolean) as { src: string; alt: string }[];
-  const scrollToSlide = (idx: number) => {
+const showNextPreviewImage = () => {
+  setPreviewIndex((current) => {
+    if (current === null || carouselImages.length === 0) return current;
+    return current >= carouselImages.length - 1 ? 0 : current + 1;
+  });
+};
+
+  const videoReferenceUrl = pickString(campaign.videoReferenceUrl);
+  const videoThumbUrl = videoReferenceUrl ? getVideoThumb(videoReferenceUrl) : "";
+
+  const pdfUrl = normalizeAssetUrl(campaign.brandGuideline?.url);
+  const pdfName = pickString(campaign.brandGuideline?.name, "Brandguideline.pdf");
+  const pdfSizeText = formatFileSize(campaign.brandGuideline?.size);
+
+  const scrollToSlide = (index: number) => {
     const el = carouselRef.current;
+
     if (!el || !carouselImages.length) return;
 
-    const clamped = Math.max(0, Math.min(idx, carouselImages.length - 1));
+    const clamped = Math.max(0, Math.min(index, carouselImages.length - 1));
     const child = el.children.item(clamped) as HTMLElement | null;
 
-    if (child) {
-      child.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
-    }
+    child?.scrollIntoView({
+      behavior: "smooth",
+      inline: "start",
+      block: "nearest",
+    });
 
     setActiveSlide(clamped);
   };
 
-  const onPrevSlide = () => scrollToSlide(activeSlide - 1);
-  const onNextSlide = () => scrollToSlide(activeSlide + 1);
-
   const onCarouselScroll = () => {
     const el = carouselRef.current;
+
     if (!el) return;
 
-    const kids = Array.from(el.children) as HTMLElement[];
-    if (!kids.length) return;
+    const children = Array.from(el.children) as HTMLElement[];
+
+    if (!children.length) return;
 
     const left = el.scrollLeft;
-    let bestIdx = 0;
-    let bestDist = Number.POSITIVE_INFINITY;
+    let bestIndex = 0;
+    let bestDistance = Number.POSITIVE_INFINITY;
 
-    kids.forEach((k, i) => {
-      const d = Math.abs(k.offsetLeft - left);
-      if (d < bestDist) {
-        bestDist = d;
-        bestIdx = i;
+    children.forEach((child, index) => {
+      const distance = Math.abs(child.offsetLeft - left);
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
       }
     });
 
-    setActiveSlide(bestIdx);
+    setActiveSlide(bestIndex);
+  };
+
+  const onCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+    } catch {
+      // Clipboard may be blocked by the browser.
+    }
+  };
+
+  const getThreadIdFromResponse = (response: any) => {
+    return pickString(
+      response?.data?.data?.threadId,
+      response?.data?.data?._id,
+      response?.data?.data?.id,
+      response?.data?.threadId,
+      response?.data?._id,
+      response?.data?.id,
+      response?.threadId,
+      response?._id,
+      response?.id
+    );
+  };
+
+  const onMailBrand = async () => {
+    if (isOpeningThread) return;
+
+    const brandId = pickString(brand.brandId, brand._id);
+    const currentInfluencerId = pickString(influencer.influencerId, influencer._id);
+    const currentCampaignId = pickString(campaign.campaignId, campaign._id);
+
+    if (!brandId || !currentInfluencerId || !currentCampaignId) {
+      setErr("Unable to open inbox. Missing brand, influencer, or campaign details.");
+      return;
+    }
+
+    setIsOpeningThread(true);
+
+    try {
+      const response = await api.post("/emails/threads", {
+        brandId,
+        influencerId: currentInfluencerId,
+        campaignId: currentCampaignId,
+        subject: campaignTitle,
+        type: "campaign",
+        source: "influencer_campaign_view",
+      });
+
+      const threadId = getThreadIdFromResponse(response);
+
+      if (!threadId) {
+        throw new Error("Thread created, but threadId was not returned.");
+      }
+
+      router.push(`/influencer/inbox/${threadId}`);
+    } catch (error: any) {
+      setErr(
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to open brand conversation."
+      );
+    } finally {
+      setIsOpeningThread(false);
+    }
   };
 
   const onDownloadPdf = () => {
     if (!pdfUrl) return;
+
     window.open(pdfUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
     <div className={PAGE_WRAP}>
-      {/* ===== Top Campaign Header ===== */}
-      <div className="w-full mt-[3.5rem]">
-        <div className="flex flex-col items-start gap-5 self-stretch pb-5 border-b border-[#E6E6E6]">
+      <div className={CONTENT_WRAP}>
+        <section className="border-b border-[#E6E6E6] pb-6">
           <div
-            className="h-[6.25rem] w-[6.25rem] rounded-[4rem] border border-white/30 bg-black"
-            style={
-              logoUrl
-                ? {
-                  backgroundImage: `url(${logoUrl})`,
-                  backgroundRepeat: "no-repeat",
-                  backgroundPosition: "11px 24px",
-                  backgroundSize: "78% 52%",
-                }
-                : undefined
-            }
+            className="h-[9.5rem] w-full rounded-t-[0.75rem]"
+            style={{ background: HERO_GRADIENT }}
           />
 
-          <div className="flex w-full items-center justify-between px-1 gap-3">
-            <div className="min-w-0">
-              <div
-                className="
-                  w-full max-w-[25.0625rem]
-                  text-[#1A1A1A] font-bold text-[1.5rem] leading-8 tracking-normal
-                  line-clamp-2
-                "
-                style={{ fontFamily: "Inter" }}
-                title={(doc as any)?.campaignTitle ?? "Campaign"}
-              >
-                {(doc as any)?.campaignTitle ?? "Campaign"}
-              </div>
-
-              <div className="mt-1">
-                {productUrl ? (
-                  <a
-                    href={productUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-[#B8B8B8] text-[0.75rem] leading-4 font-normal"
-                    style={{ fontFamily: "Inter" }}
-                    title={productUrl}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <span className="truncate max-w-[18rem]">{productUrl}</span>
-                    <ArrowUpRight className="h-4 w-4" />
-                  </a>
-                ) : (
-                  <div
-                    className="text-[#B8B8B8] text-[0.75rem] leading-4 font-normal"
-                    style={{ fontFamily: "Inter" }}
-                  >
-                    —
-                  </div>
-                )}
-              </div>
+          <div className="-mt-[3.125rem] flex flex-col gap-5">
+            <div
+              className="h-[6.25rem] w-[6.25rem] overflow-hidden rounded-full border border-white/40 bg-black shadow-sm"
+              aria-label={`${brandName} logo`}
+            >
+              {logoUrl ? (
+                <img
+                  src={logoUrl}
+                  alt={brandName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-[2rem] font-bold text-white">
+                  {brandName.charAt(0).toUpperCase()}
+                </div>
+              )}
             </div>
 
-            <div className="flex h-8 items-center gap-2">
-              <CampaignStatusBadge status={statusText} />
-            </div>
-          </div>
-        </div>
-      </div>
+            <div className="flex w-full flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div className="min-w-0">
+                <h1 className="max-w-[32rem] text-[1.5rem] font-bold leading-8 text-[#1A1A1A]">
+                  {campaignTitle}
+                </h1>
 
-      {/* ===== Category ===== */}
-      <div className="w-full">
-        <div className="flex flex-col items-stretch gap-5 self-stretch lg:flex-row lg:items-stretch">
-          <TagCard title="Category" values={categoryTags} />
-          <TagCard title="Subcategory" values={subcategoryTags} />
-          <TagCard title="Campaign type" values={campaignTypeTags} />
-          <TagCard title="Campaign Goals" values={campaignGoalTags} />
-        </div>
-      </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-1 text-[0.75rem] leading-4 text-[#B8B8B8]">
+                  <span>{brandName}</span>
+                  <span>·</span>
+                  <span>{postedText}</span>
+                </div>
 
-      <div className="w-full rounded-[1.25rem] bg-white p-5 flex flex-col items-start gap-6">
-
-        <div className="w-full">
-          <div className="mt-5 self-stretch text-[#1A1A1A] text-[1.25rem] font-semibold leading-[1.75rem]">
-            Description
-          </div>
-
-          <div className="mt-6 flex h-[14.8125rem] w-full flex-col items-start self-stretch rounded-[0.75rem] border border-[#E6E6E6] bg-white p-3 overflow-auto">
-            <div className="text-[#1A1A1A] text-[0.875rem] font-medium leading-[1.25rem] whitespace-pre-wrap">
-              {descriptionText || "—"}
-            </div>
-          </div>
-
-          <div className="mt-6 self-stretch text-[#1A1A1A] text-[1.25rem] font-semibold leading-[1.75rem]">
-            Image / Reference
-          </div>
-
-          <div className="mt-6 relative w-full">
-            {carouselImages.length ? (
-              <>
-                <div
-                  ref={carouselRef}
-                  onScroll={onCarouselScroll}
-                  className="flex w-full items-center gap-5 py-5 overflow-x-auto scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-                >
-                  {carouselImages.map((img, idx) => (
-                    <div
-                      key={`${img.src}-${idx}`}
-                      className="relative flex-none w-[13.8125rem] h-[11.5rem] overflow-hidden rounded-[1.1875rem] bg-[#F9F9F9]"
+                <div className="mt-1">
+                  {productUrl ? (
+                    <a
+                      href={productUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex max-w-[22rem] items-center gap-1 truncate text-[0.75rem] font-normal leading-4 text-[#B8B8B8]"
                     >
-                      <Image
-                        src={img.src}
-                        alt={img.alt}
-                        fill
-                        className="object-cover"
-                        unoptimized
-                      />
-                    </div>
-                  ))}
+                      <span className="truncate">{productUrl}</span>
+                      <ArrowUpRight className="h-4 w-4 shrink-0" />
+                    </a>
+                  ) : (
+                    <span className="text-[0.75rem] leading-4 text-[#B8B8B8]">
+                      —
+                    </span>
+                  )}
                 </div>
-
-                <Button
-                  variant="raised"
-                  size="sm"
-                  onClick={onPrevSlide}
-                  disabled={activeSlide <= 0}
-                  className="my-0 absolute left-4 top-[5.625rem] h-[2.75rem] w-[2.75rem] px-0 rounded-[2.5rem] bg-[#F2F2F2] border border-transparent shadow-none"
-                  leftIcon={<CaretLeft weight="bold" style={{ width: "1.25rem", height: "1.25rem" }} />}
-                />
-
-                <Button
-                  variant="raised"
-                  size="sm"
-                  onClick={onNextSlide}
-                  disabled={activeSlide >= carouselImages.length - 1}
-                  className="my-0 absolute right-4 top-[5.625rem] h-[2.75rem] w-[2.75rem] px-0 rounded-[2.5rem] bg-[#F2F2F2] border border-transparent shadow-none"
-                  leftIcon={<CaretRight weight="bold" style={{ width: "1.25rem", height: "1.25rem" }} />}
-                />
-
-                <div className="mt-2 flex w-full items-center justify-center gap-2">
-                  {carouselImages.map((_, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => scrollToSlide(i)}
-                      aria-label={`Go to slide ${i + 1}`}
-                      className="h-2 w-2 rounded-[0.5rem]"
-                      style={{ backgroundColor: i === activeSlide ? "#000000" : "#E8E8E8" }}
-                    />
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div className="flex h-[11.5rem] w-full items-center justify-center rounded-[0.75rem] border border-[#E6E6E6] bg-white text-[#969696] text-[0.875rem]">
-                —
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="mb-[1.55rem] mt-[1.75rem] h-px w-full bg-[var(--Light-Border-Subtle,#E6E6E6)]" />
-
-      <div
-        className="flex w-full flex-col items-start gap-6 self-stretch"
-        style={{ fontFamily: "Inter" }}
-      >
-        <div className="flex w-full items-center justify-between self-stretch">
-          <div className="text-[#1A1A1A] text-[1.25rem] font-semibold leading-[1.75rem]">
-            Timeline &amp; Payments
-          </div>
-        </div>
-      </div>
-
-      <div className="flex w-full flex-col items-stretch gap-3 sm:flex-row">
-        <div className="flex flex-1 flex-col items-start self-stretch rounded-[0.75rem] border border-[#E6E6E6] p-3 min-h-[12.375rem]">
-          <div className="flex h-12 w-12 items-center justify-center gap-[0.625rem] rounded-[0.5rem] bg-[#F2F2F2] p-3">
-            <CalendarDots weight="bold" style={{ width: "1.5rem", height: "1.5rem" }} />
-          </div>
-
-          <div className="mt-auto flex flex-col items-start gap-2 self-stretch">
-            <div className="text-[#B8B8B8] text-[0.875rem] font-medium leading-[1.25rem]">
-              Start date
-            </div>
-            <div className="text-[#1A1A1A] text-[1rem] font-medium leading-[1.5rem]">
-              {startDateText}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-1 flex-col items-start self-stretch rounded-[0.75rem] border border-[#E6E6E6] p-3 min-h-[12.375rem]">
-          <div className="flex h-12 w-12 items-center justify-center gap-[0.625rem] rounded-[0.5rem] bg-[#F2F2F2] p-3">
-            <CalendarX weight="bold" style={{ width: "1.5rem", height: "1.5rem" }} />
-          </div>
-
-          <div className="mt-auto flex flex-col items-start gap-2 self-stretch">
-            <div className="text-[#B8B8B8] text-[0.875rem] font-medium leading-[1.25rem]">
-              End date
-            </div>
-            <div className="text-[#1A1A1A] text-[1rem] font-medium leading-[1.5rem]">
-              {endDateText}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-1 flex-col items-start self-stretch rounded-[0.75rem] border border-[#E6E6E6] p-3 min-h-[12.375rem]">
-          <div className="flex h-12 w-12 items-center justify-center gap-[0.625rem] rounded-[0.5rem] bg-[#F2F2F2] p-3">
-            <Wallet weight="bold" style={{ width: "1.5rem", height: "1.5rem" }} />
-          </div>
-
-          <div className="mt-auto flex flex-col items-start gap-2 self-stretch">
-            <div className="text-[#B8B8B8] text-[0.875rem] font-medium leading-[1.25rem]">
-              Payment type
-            </div>
-            <div className="text-[#1A1A1A] text-[1rem] font-medium leading-[1.5rem]">
-              {paymentTypeText}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-[1.75rem] h-px w-full bg-[var(--Light-Border-Subtle,#E6E6E6)]" />
-
-      <div className="w-full rounded-[1.25rem] bg-white p-5 flex flex-col items-start gap-6">
-        <div className="flex w-full justify-between items-start self-stretch">
-          <div className="flex flex-col justify-center items-start gap-1 flex-1">
-            <div className="text-[#1A1A1A] text-[1.25rem] font-semibold leading-[1.75rem]">
-              Audience &amp; Platforms
-            </div>
-
-            <div className="text-[#B8B8B8] text-[0.875rem] font-medium leading-[1.25rem]">
-              {lorem10}
-            </div>
-          </div>
-        </div>
-
-        <div className="w-full mt-6 flex flex-col sm:flex-row gap-6">
-          <div className="w-full flex flex-col gap-3">
-            <div className="flex h-[4.5rem] p-3 flex-col justify-between items-start self-stretch rounded-[0.75rem] border border-[#E6E6E6] bg-white">
-              <div className="text-[#B8B8B8] text-[0.875rem] font-medium leading-[1.25rem]">
-                Target Platform
               </div>
 
-              <div className="flex items-center gap-2">
-                {platforms.length ? (
-                  platforms.map((p, idx) => {
-                    const key = `${p}-${idx}`;
-                    const lower = String(p).toLowerCase();
-
-                    if (lower === "instagram") {
-                      return (
-                        <Image
-                          key={key}
-                          src="/skill-icons_instagram.svg"
-                          alt="Instagram"
-                          width={20}
-                          height={20}
-                          className="w-5 h-5"
-                        />
-                      );
-                    }
-
-                    if (lower === "youtube") {
-                      return (
-                        <Image
-                          key={key}
-                          src="/logos_youtube-icon.svg"
-                          alt="YouTube"
-                          width={20}
-                          height={20}
-                          className="w-5 h-5"
-                        />
-                      );
-                    }
-
-                    if (lower === "tiktok") {
-                      return (
-                        <Image
-                          key={key}
-                          src="/ic_baseline-tiktok.svg"
-                          alt="TikTok"
-                          width={20}
-                          height={20}
-                          className="w-5 h-5"
-                        />
-                      );
-                    }
-
-                    return (
-                      <span
-                        key={key}
-                        className="flex h-7 items-center justify-center rounded-[1.25rem] bg-[#F9F9F9] px-3"
-                      >
-                        <span className="text-[#1A1A1A] text-[0.875rem] font-semibold leading-[1.25rem]">
-                          {String(p)}
-                        </span>
-                      </span>
-                    );
-                  })
-                ) : (
-                  <span className="text-[#969696] text-[0.875rem]">—</span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex p-3 flex-col items-start gap-3 self-stretch rounded-[0.75rem] border border-[#E6E6E6] bg-white">
-              <div className="text-[#B8B8B8] text-[0.875rem] font-medium leading-[1.25rem]">
-                Target Country
-              </div>
-
-              <div className="mt-2 text-[#1A1A1A] text-[0.875rem] font-semibold leading-[1.25rem]">
-                {targetCountryText}
-              </div>
-            </div>
-
-            <div className="flex p-3 flex-col items-start gap-3 self-stretch rounded-[0.75rem] border border-[#E6E6E6] bg-white">
-              <div className="text-[#B8B8B8] text-[0.875rem] font-medium leading-[1.25rem]">
-                Target age group
-              </div>
-
-              <div className="flex flex-wrap gap-2 self-stretch">
-                {ages.length ? (
-                  [...ages]
-                    .sort((a: any, b: any) => {
-                      const getStartAge = (value: string) => {
-                        const match = String(value || "").match(/\d+/);
-                        return match ? Number(match[0]) : Infinity;
-                      };
-
-                      return getStartAge(a?.range) - getStartAge(b?.range);
-                    })
-                    .map((a: any, idx: number) => (
-                      <span
-                        key={`${String(a?.id ?? a?._id ?? a?.range ?? idx)}-${idx}`}
-                        className="flex h-7 items-center justify-center rounded-[1.25rem] bg-[#F9F9F9] px-3"
-                      >
-                        <span className="text-[#1A1A1A] text-[0.875rem] font-semibold leading-[1.25rem]">
-                          {String(a?.range ?? "—")}
-                        </span>
-                      </span>
-                    ))
-                ) : (
-                  <span className="text-[#969696] text-[0.875rem]">—</span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* <div className="w-full sm:w-1/2 flex flex-col items-start gap-[1.3125rem] rounded-[0.75rem] border border-[#E6E6E6] bg-white p-3 h-auto">
-            <div className="text-[#1A1A1A] text-[0.75rem] font-semibold leading-[1.25rem] self-stretch">
-              Video Reference
-            </div>
-
-            {videoReferenceUrl ? (
-              <div className="flex flex-col gap-2">
-                <a
-                  href={videoReferenceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[#B8B8B8] text-[0.875rem] font-medium leading-[1.25rem] break-all"
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onCopyLink}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[0.5rem] bg-white px-2 text-[0.875rem] font-medium text-[#1A1A1A] transition hover:bg-[#F9F9F9]"
                 >
-                  {videoReferenceUrl}
-                </a>
+                  <LinkSimple className="h-4 w-4" />
+                  Copy link
+                </button>
 
-                <a
-                  href={videoReferenceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-[12.875rem] h-[10.125rem] rounded-[0.25rem] bg-cover bg-center"
-                  style={{
-                    backgroundImage: videoThumbUrl ? `url(${videoThumbUrl})` : undefined,
-                    backgroundColor: videoThumbUrl ? undefined : "#eee",
-                  }}
-                />
+                <button
+                  type="button"
+                  onClick={onMailBrand}
+                  disabled={isOpeningThread || !pickString(brand.brandId, brand._id)}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[0.5rem] border border-[#E6E6E6] bg-white px-3 text-[0.875rem] font-medium text-[#1A1A1A] transition hover:bg-[#F9F9F9] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isOpeningThread ? "Opening..." : "Mail to brand"}
+                  <EnvelopeSimple className="h-4 w-4" />
+                </button>
+
+                <button
+                  type="button"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[0.5rem] border border-[#E6E6E6] bg-white text-[#1A1A1A] transition hover:bg-[#F9F9F9]"
+                  aria-label="More options"
+                >
+                  <DotsThree className="h-5 w-5" />
+                </button>
               </div>
-            ) : (
-              <div className="text-[#969696] text-[0.875rem] font-normal leading-[1.25rem]">
-                —
-              </div>
-            )}
-          </div> */}
-        </div>
-      </div>
-
-      <div className="mt-[1.75rem] h-px w-full bg-[var(--Light-Border-Subtle,#E6E6E6)]" />
-
-      <div className="w-full rounded-[1.25rem] bg-white  p-5 flex flex-col items-start gap-6 mb-[1.75rem]">
-        <div className="flex w-full justify-between items-start self-stretch">
-          <div className="flex flex-col justify-center items-start gap-1 flex-1">
-            <div className="text-[#1A1A1A] text-[1.25rem] font-semibold leading-[1.75rem]">
-              Additional Information
-            </div>
-
-            <div className="text-[#B8B8B8] text-[0.875rem] font-medium leading-[1.25rem]">
-              {lorem10}
             </div>
           </div>
+        </section>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_20.75rem]">
+          <Card className="p-5">
+            <h2 className="text-[1.25rem] font-semibold leading-7 text-[#1A1A1A]">
+              About Campaign
+            </h2>
+
+            <p className="mt-5 line-clamp-5 text-[0.875rem] font-normal leading-5 text-[#969696]">
+              {descriptionText || "—"}
+            </p>
+
+            <div className="mt-8">
+              <div className="[font-family:var(--Font-Family-Inter,Inter)] text-[0.75rem] font-semibold leading-[1.25rem] text-[#1A1A1A]">
+                Campaign Goals
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-x-12 gap-y-3">
+                {campaignGoalTags.length ? (
+                  campaignGoalTags.map((goal, index) => (
+                    <span
+                      key={`campaign-goal-${goal}-${index}`}
+                      className="[font-family:var(--Font-Family-Inter,Inter)] text-center text-[0.875rem] font-semibold leading-[1.25rem] tracking-[0] text-[#1A1A1A]"
+                    >
+                      {goal}
+                    </span>
+                  ))
+                ) : (
+                  <EmptyValue />
+                )}
+              </div>
+
+              <div className="mt-8 [font-family:var(--Font-Family-Inter,Inter)] text-[0.75rem] font-semibold leading-[1.25rem] text-[#1A1A1A]">
+                Campaign Type
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-4">
+                {campaignTypeTags.length ? (
+                  campaignTypeTags.map((type, index) => (
+                    <span
+                      key={`campaign-type-${type}-${index}`}
+                      className="inline-flex min-h-7 items-center justify-center rounded-[0.375rem] bg-[#F9F9F9] px-3 py-1 [font-family:var(--Font-Family-Inter,Inter)] text-center text-[0.875rem] font-semibold leading-[1.25rem] tracking-[0] text-[#1A1A1A]"
+                    >
+                      {type}
+                    </span>
+                  ))
+                ) : (
+                  <EmptyValue />
+                )}
+              </div>
+            </div>
+          </Card>
+
+          <Card className="flex flex-col gap-6 p-5">
+            <div>
+              <div className="text-[1.25rem] font-bold leading-7 text-[#1A1A1A]">
+                {payoutText}
+              </div>
+              <div className="text-[0.75rem] font-normal leading-4 text-[#B8B8B8]">
+                Campaign Payout
+              </div>
+            </div>
+
+            <StatRow
+              icon={<CalendarDots weight="bold" className="h-5 w-5" />}
+              value={startDateText}
+              label="Start Date"
+            />
+
+            <StatRow
+              icon={<CalendarX weight="bold" className="h-5 w-5" />}
+              value={endDateText}
+              label="End Date"
+            />
+
+            <StatRow
+              icon={<Wallet weight="bold" className="h-5 w-5" />}
+              value={paymentTypeText}
+              label="Payment Type"
+            />
+
+            <div>
+              <div className="flex items-center">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <span
+                    key={index}
+                    className="-ml-2 first:ml-0 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-[#EDEDED] text-[0.625rem] font-semibold text-[#1A1A1A]"
+                  >
+                    {index === 3 ? `${appliedCount || 10}+` : ""}
+                  </span>
+                ))}
+              </div>
+
+              <div className="mt-2 text-[0.75rem] font-normal leading-4 text-[#B8B8B8]">
+                {appliedCount || 0} Influencer Already Applied
+              </div>
+            </div>
+          </Card>
         </div>
 
-        <div className="w-full">
-          <div className="flex h-[14.8125rem] flex-col items-start self-stretch rounded-[0.75rem] border border-[#E6E6E6] bg-white overflow-hidden">
-            <div className="flex w-full items-center self-stretch px-3 py-2 border-b border-[#E6E6E6] rounded-t-[0.6875rem]">
-              <div className="text-[#969696] text-[1rem] font-medium leading-[1.5rem]">
-                Additional Notes
-              </div>
-            </div>
-
-            <div className="flex flex-1 w-full p-3 items-start justify-between self-stretch overflow-auto">
-              <div className="text-[#1A1A1A] text-[0.875rem] font-medium leading-[1.25rem] whitespace-pre-wrap">
-                {additionalNotesText || "—"}
-              </div>
-            </div>
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_20.75rem]">
+          <div className="grid gap-5 md:grid-cols-2">
+            <TagCard title="Category" values={categoryTags} />
+            <TagCard title="Subcategory" values={subcategoryTags} />
           </div>
 
           {pdfUrl ? (
-            <div className="mt-5 flex w-full items-center justify-between self-stretch rounded-[0.75rem] border border-[#E6E6E6] bg-white px-3 py-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <FilePdf weight="bold" style={{ width: "2rem", height: "2rem" }} />
+            <PdfAttachmentCard
+              name={pdfName}
+              size={pdfSizeText}
+              onDownload={onDownloadPdf}
+            />
+          ) : (
+            <Card className="flex min-h-[5rem] items-center justify-center p-4 text-[0.875rem] text-[#969696]">
+              No brand guideline attached
+            </Card>
+          )}
+        </div>
 
-                <div className="flex flex-col min-w-0">
-                  <div className="text-[#1A1A1A] text-[1rem] font-medium leading-[1.5rem] truncate">
-                    {pdfName}
-                  </div>
-                  {pdfSizeText ? (
-                    <div className="text-[#969696] text-[0.875rem] font-normal leading-[1.25rem]">
-                      {pdfSizeText}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
+        <div className="mt-7 grid gap-5 lg:grid-cols-[minmax(0,1fr)_20.75rem]">
+          <div className="min-w-0">
+            <SectionTitle>Image / Reference</SectionTitle>
 
-              <Button
-                variant="raised"
-                size="sm"
-                onClick={onDownloadPdf}
-                className="my-0 h-[2.0625rem] w-[7rem] px-2 rounded-[0.75rem] bg-white border border-transparent shadow-[0_2px_4px_-2px_rgba(0,0,0,0.08),0_4px_8px_-2px_rgba(0,0,0,0.04)]"
-                leftIcon={
-                  <DownloadSimple weight="bold" style={{ width: "0.875rem", height: "0.875rem" }} />
-                }
-              >
-                <span className="text-center text-[#1A1A1A] text-[0.75rem] font-semibold leading-[1.25rem]">
-                  Download
-                </span>
-              </Button>
-            </div>
-          ) : null}
-
-          {/* <div className="mt-5 flex flex-col items-start self-stretch rounded-[0.75rem] border border-[#E6E6E6] bg-white p-3 h-[11.4375rem] gap-[1.3125rem]">
-            <div className="text-[#1A1A1A] text-[0.75rem] font-semibold leading-[1.25rem]">
-              Hashtags
-            </div>
-
-            <div className="flex flex-wrap gap-2 self-stretch">
-              {hashtags.length ? (
-                hashtags.map((tag: string, idx: number) => (
-                  <span
-                    key={`${tag}-${idx}`}
-                    className="flex h-7 items-center justify-center rounded-[1.25rem] bg-[#F9F9F9] px-3"
+            <div className="relative mt-6">
+              {carouselImages.length ? (
+                <>
+                  <div
+                    ref={carouselRef}
+                    onScroll={onCarouselScroll}
+                    className="flex w-full items-center gap-5 overflow-x-auto scroll-smooth py-5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
                   >
-                    <span className="text-[#1A1A1A] text-[0.75rem] font-medium leading-[1.25rem]">
-                      {tag}
-                    </span>
-                  </span>
-                ))
+                    {carouselImages.map((src, index) => (
+<button
+  key={`${src}-${index}`}
+  type="button"
+  onClick={() => openImagePreview(index)}
+  className="h-[11.5rem] w-[13.8125rem] flex-none cursor-zoom-in rounded-[1.1875rem] bg-contain bg-center bg-no-repeat transition hover:opacity-90"
+  style={{ backgroundImage: `url(${src})` }}
+  aria-label={`Preview campaign image ${index + 1}`}
+/>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => scrollToSlide(activeSlide - 1)}
+                    disabled={activeSlide <= 0}
+                    className="absolute left-4 top-[5.5rem] flex h-11 w-11 items-center justify-center rounded-full bg-[#F2F2F2] text-[#1A1A1A] disabled:opacity-40"
+                    aria-label="Previous image"
+                  >
+                    <CaretLeft weight="bold" className="h-5 w-5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => scrollToSlide(activeSlide + 1)}
+                    disabled={activeSlide >= carouselImages.length - 1}
+                    className="absolute right-4 top-[5.5rem] flex h-11 w-11 items-center justify-center rounded-full bg-[#F2F2F2] text-[#1A1A1A] disabled:opacity-40"
+                    aria-label="Next image"
+                  >
+                    <CaretRight weight="bold" className="h-5 w-5" />
+                  </button>
+
+                  <div className="mt-1 flex w-full items-center justify-center gap-2">
+                    {carouselImages.map((_, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => scrollToSlide(index)}
+                        aria-label={`Go to image ${index + 1}`}
+                        className="h-2 w-2 rounded-full"
+                        style={{
+                          backgroundColor:
+                            index === activeSlide ? "#1A1A1A" : "#E8E8E8",
+                        }}
+                      />
+                    ))}
+                  </div>
+                </>
               ) : (
-                <span className="text-[#969696] text-[0.875rem] leading-[1.25rem]">—</span>
+                <Card className="mt-5 flex h-[11.5rem] items-center justify-center text-[0.875rem] text-[#969696]">
+                  —
+                </Card>
               )}
             </div>
-          </div> */}
+
+            <div className="mb-[1.55rem] mt-[1.75rem] h-px w-full bg-[#E6E6E6]" />
+
+            <SectionTitle>Creator Requirement</SectionTitle>
+
+            <div className="mt-6">
+              <CreatorRequirementGrid
+                numberOfInfluencers={numberOfInfluencers}
+                influencerTier={influencerTier || "—"}
+                contentLanguage={contentLanguage || "—"}
+                contentFormat={contentFormat}
+                minFollowers={minFollowers}
+                maxFollowers={maxFollowers}
+              />
+            </div>
+
+            <div className="mb-[1.55rem] mt-[1.75rem] h-px w-full bg-[#E6E6E6]" />
+
+            <SectionTitle>Timeline &amp; Payments</SectionTitle>
+
+            <div className="mt-6 grid gap-5 md:grid-cols-2">
+              <InfoTile
+                icon={<CalendarDots weight="bold" className="h-6 w-6" />}
+                label="Start date"
+                value={shortStartDateText}
+              />
+
+              <InfoTile
+                icon={<CalendarX weight="bold" className="h-6 w-6" />}
+                label="End Date"
+                value={shortEndDateText}
+              />
+
+              <InfoTile
+                icon={<Wallet weight="bold" className="h-6 w-6" />}
+                label="Payment type"
+                value={paymentTypeText}
+              />
+
+              <InfoTile label="Hashtags">
+                <div className="flex flex-wrap gap-2">
+                  {hashtags.length ? (
+                    hashtags.map((tag, index) => (
+                      <Pill key={`${tag}-${index}`}>{tag}</Pill>
+                    ))
+                  ) : (
+                    <EmptyValue />
+                  )}
+                </div>
+              </InfoTile>
+            </div>
+
+            <div className="mb-[1.55rem] mt-[1.75rem] h-px w-full bg-[#E6E6E6]" />
+
+            <SectionTitle>Audience &amp; Platforms</SectionTitle>
+
+            <div className="mt-6 grid gap-5 md:grid-cols-2">
+              <div className="flex flex-col gap-3">
+                <Card className="flex min-h-[4.5rem] flex-col justify-between p-3">
+                  <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
+                    Target Platform
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {targetPlatforms.length ? (
+                      targetPlatforms.map((platform, index) => (
+                        <PlatformIcon
+                          key={`${platform}-${index}`}
+                          platform={platform}
+                        />
+                      ))
+                    ) : (
+                      <EmptyValue />
+                    )}
+                  </div>
+                </Card>
+
+                <Card className="p-3">
+                  <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
+                    Target country
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {targetCountries.length ? (
+                      targetCountries.map((country, index) => (
+                        <Pill key={`${country}-${index}`}>{country}</Pill>
+                      ))
+                    ) : (
+                      <EmptyValue />
+                    )}
+                  </div>
+                </Card>
+
+                <Card className="p-3">
+                  <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
+                    Target age group
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {targetAgeGroups.length ? (
+                      targetAgeGroups.map((age, index) => (
+                        <Pill key={`${age}-${index}`}>{age}</Pill>
+                      ))
+                    ) : (
+                      <EmptyValue />
+                    )}
+                  </div>
+                </Card>
+              </div>
+
+              <Card className="p-3">
+                <div className="text-[0.75rem] font-semibold leading-5 text-[#1A1A1A]">
+                  Video Reference
+                </div>
+
+                {videoReferenceUrl ? (
+                  <div className="mt-5 flex flex-col gap-3">
+                    <a
+                      href={videoReferenceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="line-clamp-1 break-all text-[0.875rem] font-medium leading-5 text-[#B8B8B8]"
+                    >
+                      {videoReferenceUrl}
+                    </a>
+
+                    <a
+                      href={videoReferenceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="h-[10.125rem] w-[12.875rem] rounded-[0.25rem] bg-[#F2F2F2] bg-cover bg-center"
+                      style={{
+                        backgroundImage: videoThumbUrl
+                          ? `url(${videoThumbUrl})`
+                          : undefined,
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="mt-5 text-[0.875rem] text-[#969696]">—</div>
+                )}
+              </Card>
+            </div>
+
+            <div className="mb-[1.55rem] mt-[1.75rem] h-px w-full bg-[#E6E6E6]" />
+
+            <Card className="p-5">
+              <SectionTitle>Additional Notes</SectionTitle>
+
+              <p className="mt-5 line-clamp-5 text-[0.875rem] font-normal leading-5 text-[#969696]">
+                {additionalNotesText || "—"}
+              </p>
+            </Card>
+          </div>
+
+          <div className="hidden lg:block" />
         </div>
       </div>
 
-      <div className="mb-[1.75rem] mt-[1.75rem] h-px w-full" />
+{previewIndex !== null ? (
+  <ImagePreviewModal
+    images={carouselImages}
+    activeIndex={previewIndex}
+    onClose={closeImagePreview}
+    onPrev={showPreviousPreviewImage}
+    onNext={showNextPreviewImage}
+  />
+) : null}
 
       <div
-        className="fixed bottom-0 z-40 border-t border-gray-200 bg-white"
+        className="fixed bottom-0 z-40 border-t border-[#E6E6E6] bg-white"
         style={{
           left: `${sidebarWidth}px`,
           width: `calc(100vw - ${sidebarWidth}px)`,
         }}
       >
-        <div className="flex h-20 w-full items-center justify-end pr-4 sm:pr-6 lg:pr-8">
-          <div className="flex w-auto items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={() => router.push("/influencer/dashboards")}
-            >
-              Go to Dashboard
-            </Button>
+        <div className="flex h-20 w-full items-center justify-end gap-2 px-4 sm:px-6 lg:px-8">
+          <button
+            type="button"
+            onClick={() => router.push("/influencer/dashboards")}
+            className="h-11 rounded-[0.75rem] bg-white px-5 text-[0.875rem] font-medium text-[#1A1A1A] hover:underline"
+          >
+            Go to Dashboard
+          </button>
 
-            <Button
-              variant="solid"
-              onClick={handleApply}
-              disabled={isApplying || hasApplied}
-              className={
-                hasApplied
-                  ? "my-0 h-11 w-auto cursor-default rounded-[0.75rem] border border-[#E6E6E6] bg-[#F2F2F2] px-8 text-[#969696] hover:bg-[#F2F2F2]"
-                  : "my-0 h-11 w-auto rounded-[0.75rem] bg-black px-8 text-white hover:bg-black/90 disabled:bg-black/70"
-              }
+          {hasAppliedValue === 1 ? (
+            <button
+              type="button"
+              disabled
+              className="h-11 cursor-default rounded-[0.75rem] border border-[#E6E6E6] bg-[#F2F2F2] px-8 text-[0.875rem] font-semibold text-[#969696]"
             >
-              {hasApplied ? "Applied" : isApplying ? "Applying..." : "Apply"}
-            </Button>
-          </div>
+              Applied
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="h-11 rounded-[0.75rem] bg-[#1A1A1A] px-8 text-[0.875rem] font-semibold text-white transition hover:bg-black/90"
+            >
+              Apply
+            </button>
+          )}
         </div>
       </div>
     </div>

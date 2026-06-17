@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   DotsThree,
   EnvelopeOpen,
@@ -53,7 +53,7 @@ export interface InfluencerCampaignManageCardProps {
 
   onCardClick?: () => void;
   onManageCampaign?: () => void;
-  onMessageClick?: () => void;
+  onMessageClick?: () => void | Promise<void>;
   onMoreClick?: () => void;
 }
 
@@ -264,6 +264,8 @@ export default function InfluencerCampaignManageCard({
   onMessageClick,
   onMoreClick,
 }: InfluencerCampaignManageCardProps) {
+  const [isOpeningMessage, setIsOpeningMessage] = useState(false);
+
   const status = getStatusVisual(statusVariant);
 
   const progress = useMemo(
@@ -278,6 +280,18 @@ export default function InfluencerCampaignManageCard({
 
   const displayStatus = statusLabel || status.label;
   const initials = getInitials(name || brandName);
+
+  const handleMessageClick = async () => {
+    if (!onMessageClick || isOpeningMessage) return;
+
+    setIsOpeningMessage(true);
+
+    try {
+      await onMessageClick();
+    } finally {
+      setIsOpeningMessage(false);
+    }
+  };
 
   return (
     <article
@@ -455,10 +469,11 @@ export default function InfluencerCampaignManageCard({
           <button
             type="button"
             aria-label="Open messages"
+            disabled={!onMessageClick || isOpeningMessage}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              onMessageClick?.();
+              handleMessageClick();
             }}
             className={[
               "flex h-[2.375rem] w-[2.375rem] items-center justify-center",
@@ -467,9 +482,13 @@ export default function InfluencerCampaignManageCard({
               "bg-[var(--Light-Background-Primary,#FFF)]",
               "p-[0.6875rem] text-[#1A1A1A]",
               "transition hover:bg-[#F7F7F7]",
+              "disabled:cursor-not-allowed disabled:opacity-50",
             ].join(" ")}
           >
-            <EnvelopeOpen size={18} />
+            <EnvelopeOpen
+              size={18}
+              className={isOpeningMessage ? "animate-pulse" : undefined}
+            />
           </button>
         </div>
 

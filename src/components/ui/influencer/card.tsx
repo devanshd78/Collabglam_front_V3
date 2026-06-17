@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { CheckCircle, Trash } from "@phosphor-icons/react";
+import { createPortal } from "react-dom";
 
 export type InfluencerDiscoverCardProps = {
   title: string;
@@ -445,7 +446,7 @@ export default function CampaignCard({
       role={onCardClick ? "button" : undefined}
       tabIndex={onCardClick ? 0 : undefined}
       className={cn(
-        "relative flex w-full min-w-0 max-w-none max-h-[31.5rem] flex-col overflow-hidden rounded-[1.5rem]",
+"relative flex w-[22.5rem] max-w-full min-w-0 max-h-[31.5rem] flex-col overflow-hidden rounded-[1.5rem]",
         "border border-[var(--Light-Border-Subtle,#E6E6E6)] bg-white",
         onCardClick &&
         "cursor-pointer transition hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)]",
@@ -471,7 +472,7 @@ export default function CampaignCard({
               onClick={goToPrevImage}
               aria-label="Previous image"
               className={[
-                "absolute left-[1rem] top-1/2 z-10 -translate-y-1/2",
+                "absolute left-[1rem] top-1/2 -translate-y-1/2",
                 "flex h-[2rem] w-[2rem] items-center justify-center gap-[0.625rem]",
                 "rounded-[2.5rem] bg-[var(--Light-Background-Primary,#FFF)] p-[0.25rem]",
                 "text-[#1A1A1A]",
@@ -487,7 +488,7 @@ export default function CampaignCard({
               onClick={goToNextImage}
               aria-label="Next image"
               className={[
-                "absolute right-[1rem] top-1/2 z-10 -translate-y-1/2",
+                "absolute right-[1rem] top-1/2 -translate-y-1/2",
                 "flex h-[2rem] w-[2rem] items-center justify-center gap-[0.625rem]",
                 "rounded-[2.5rem] bg-[var(--Light-Background-Primary,#FFF)] p-[0.25rem]",
                 "text-[#1A1A1A]",
@@ -518,7 +519,7 @@ export default function CampaignCard({
 
         <div
           className={[
-            "absolute left-[1.5rem] bottom-[-2rem] z-10",
+            "absolute left-[1.5rem] bottom-[-2rem]",
             "flex h-[4rem] w-[4rem] flex-col items-center justify-center",
             "overflow-hidden rounded-[0.625rem] border-2 border-[#F2F2F2] bg-white",
             "text-[1.5rem] font-semibold leading-none text-[#1A1A1A]",

@@ -1,5 +1,7 @@
-import MyCampaignsContent from "./mycampaign";
+import { redirect } from "next/navigation";
 
-export default function MyCampaignsPage() {
-  return <MyCampaignsContent variant="all" />;
-}
+const MyCampaignPage = () => {
+  redirect("/influencer/my-campaigns/all");
+};
+
+export default MyCampaignPage;

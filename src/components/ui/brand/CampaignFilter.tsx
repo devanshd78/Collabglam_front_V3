@@ -680,7 +680,7 @@ export default function CampaignFilter({
   }
 
   return (
-    <div className="mt-8 flex w-full flex-wrap items-start justify-between gap-x-10 gap-y-3">
+    <div className="flex w-full flex-wrap items-start justify-between gap-x-10 gap-y-3">
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-3">
         <SingleSelectCombobox
           label="Campaign Type"

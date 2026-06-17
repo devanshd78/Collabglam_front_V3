@@ -60,7 +60,7 @@ export default function MyCampaignNavbar() {
                 "transition-colors",
                 "focus-visible:outline focus-visible:outline-2 focus-visible:outline-neutral-900/35 focus-visible:outline-offset-2",
                 isActive
-                  ? "border-neutral-900 text-neutral-900 font-semibold"
+                  ? "border-[#FFBF00] text-neutral-900 font-semibold"
                   : "border-transparent text-neutral-600 font-medium hover:text-neutral-900 hover:border-neutral-300",
               ].join(" ")}
             >

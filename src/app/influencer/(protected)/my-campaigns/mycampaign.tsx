@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import MyCampaignNavbarGate from "./myCampaignNavGate";
+import SidebarCampaign from "./sidebarCampaign"
 import CampaignCard from "@/components/ui/influencer/card";
 import MyCampaignCard from "@/components/ui/influencer/myCamapignCard";
 import CampaignFilter, {
@@ -113,6 +114,17 @@ const CONTRACT_STATUS = {
   REJECTED: "REJECTED",
 } as const;
 
+const MY_CAMPAIGN_CARD_VARIANTS = new Set<MyCampaignVariant>([
+  "all",
+  "active",
+  "completed",
+]);
+
+const APPLIED_STYLE_CARD_VARIANTS = new Set<MyCampaignVariant>([
+  "applied",
+  "rejected",
+]);
+
 function getStoredValue(keys: string[]) {
   if (typeof window === "undefined") return "";
 
@@ -156,6 +168,20 @@ function getFirstString(...values: any[]) {
   }
 
   return "";
+}
+
+function getThreadIdFromResponse(response: any) {
+  return getFirstString(
+    response?.data?.data?.threadId,
+    response?.data?.data?._id,
+    response?.data?.data?.id,
+    response?.data?.threadId,
+    response?.data?._id,
+    response?.data?.id,
+    response?.threadId,
+    response?._id,
+    response?.id
+  );
 }
 
 function normStatus(value?: string) {
@@ -214,11 +240,34 @@ function asArray(value: any): any[] {
   return Array.isArray(value) ? value : [value];
 }
 
+function isMongoObjectIdLike(value: any) {
+  return /^[a-f0-9]{24}$/i.test(String(value || "").trim());
+}
+
+function dedupeClean(values: string[]) {
+  const seen = new Set<string>();
+
+  return values
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .filter((value) => !isMongoObjectIdLike(value))
+    .filter((value) => {
+      const key = value.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
 function getCountryNameFromObject(item: any) {
   if (!item) return "";
-  if (typeof item === "string") return item.trim();
 
-  return getFirstString(
+  if (typeof item === "string") {
+    const value = item.trim();
+    return isMongoObjectIdLike(value) ? "" : value;
+  }
+
+  const value = getFirstString(
     item.countryNameEn,
     item.countryName,
     item.name,
@@ -227,52 +276,101 @@ function getCountryNameFromObject(item: any) {
     item.label,
     item.value
   );
+
+  return isMongoObjectIdLike(value) ? "" : value;
 }
 
 function getCountries(value: any) {
   if (!value) return [];
 
   if (typeof value === "string") {
-    return value
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
+    return dedupeClean(
+      value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    );
   }
 
-  return asArray(value)
-    .map((item) => getCountryNameFromObject(item))
-    .filter(Boolean);
+  return dedupeClean(
+    asArray(value)
+      .map((item) => getCountryNameFromObject(item))
+      .filter(Boolean)
+  );
 }
 
 function getTagValues(value: any, keys: string[]) {
-  return asArray(value)
-    .map((item) => {
-      if (typeof item === "string" || typeof item === "number") {
-        return String(item).trim();
-      }
+  return dedupeClean(
+    asArray(value)
+      .map((item) => {
+        if (typeof item === "string" || typeof item === "number") {
+          const value = String(item).trim();
+          return isMongoObjectIdLike(value) ? "" : value;
+        }
 
-      if (item && typeof item === "object") {
-        for (const key of keys) {
-          const next = item?.[key];
+        if (item && typeof item === "object") {
+          for (const key of keys) {
+            const next = item?.[key];
 
-          if (typeof next === "string" && next.trim()) {
-            return next.trim();
+            if (typeof next === "string" && next.trim()) {
+              return next.trim();
+            }
           }
         }
-      }
 
-      return "";
-    })
-    .filter(Boolean);
+        return "";
+      })
+      .filter(Boolean)
+  );
+}
+
+function isAgeRangeLabel(value: any) {
+  const text = String(value || "").trim();
+
+  if (!text || isMongoObjectIdLike(text)) return false;
+
+  return (
+    /^\d{1,2}\s*[-–—]\s*\d{1,2}\+?$/.test(text) ||
+    /^\d{1,2}\+$/.test(text)
+  );
+}
+
+function getAgeRangeValues(...values: any[]) {
+  return dedupeClean(
+    values
+      .flatMap((value) => asArray(value))
+      .map((item) => {
+        if (typeof item === "string" || typeof item === "number") {
+          return String(item).trim();
+        }
+
+        if (item && typeof item === "object") {
+          return getFirstString(
+            item.range,
+            item.ageRange,
+            item.label,
+            item.name,
+            item.title,
+            item.value
+          );
+        }
+
+        return "";
+      })
+      .filter(isAgeRangeLabel)
+  );
 }
 
 function compactAgeLabel(ranges: string[]) {
-  const clean = ranges.filter(Boolean);
+  const clean = getAgeRangeValues(ranges).map((range) =>
+    range.replace(/\s*[–—-]\s*/g, "-")
+  );
 
   if (clean.length === 0) return "";
+  if (clean.length <= 2) return clean.join(", ");
 
   const numbers = clean
-    .flatMap((range) => String(range).match(/\d+/g) || [])
+    .flatMap((range) => range.match(/\d+/g) || [])
     .map(Number)
     .filter((num) => Number.isFinite(num));
 
@@ -280,7 +378,7 @@ function compactAgeLabel(ranges: string[]) {
     return `${Math.min(...numbers)}-${Math.max(...numbers)}`;
   }
 
-  return clean[0] || "";
+  return clean.join(", ");
 }
 
 function extractCampaignList(res: any, variant?: MyCampaignVariant): any[] {
@@ -467,16 +565,17 @@ function mapApiCampaign(source: any): CampaignData {
     details?.category?.name,
     Array.isArray(campaignDoc.categories) && campaignDoc.categories.length > 0
       ? campaignDoc.categories[0]?.subcategoryName ||
-      campaignDoc.categories[0]?.categoryName
+          campaignDoc.categories[0]?.categoryName
       : ""
   );
 
-  const targetCountryValues = [
+  const targetCountryValues = dedupeClean([
     ...getCountries(campaignDoc.targetCountryValues),
     ...getCountries(campaignDoc.targetCountries),
     ...getCountries(details.targetCountries),
     ...getCountries(campaignDoc.targetCountry),
-  ].filter(Boolean);
+    ...getCountries(campaignDoc.targetCountryIds),
+  ]);
 
   const campaignGoalValues = [
     ...getTagValues(campaignDoc.campaignGoalValues, [
@@ -494,26 +593,14 @@ function mapApiCampaign(source: any): CampaignData {
     ]),
   ];
 
-  const targetAgeGroupValues = [
-    ...getTagValues(campaignDoc.targetAgeGroupValues, [
-      "range",
-      "name",
-      "label",
-      "title",
-    ]),
-    ...getTagValues(details.targetAgeRanges, [
-      "range",
-      "name",
-      "label",
-      "title",
-    ]),
-    ...getTagValues(campaignDoc.targetAgeRanges, [
-      "range",
-      "name",
-      "label",
-      "title",
-    ]),
-  ];
+  const targetAgeGroupValues = getAgeRangeValues(
+    campaignDoc.targetAgeGroupValues,
+    details.targetAgeRanges,
+    campaignDoc.targetAgeRanges,
+    campaignDoc.targetAgeRange,
+    campaignDoc.ageRanges,
+    campaignDoc.targetAgeRangeValues
+  );
 
   const contractMongoId = getFirstString(
     source?.contractMongoId,
@@ -547,10 +634,10 @@ function mapApiCampaign(source: any): CampaignData {
 
   const budget = Number(
     campaignDoc.campaignBudget ||
-    campaignDoc.budget ||
-    campaignDoc.influencerBudget ||
-    source?.feeAmount ||
-    0
+      campaignDoc.budget ||
+      campaignDoc.influencerBudget ||
+      source?.feeAmount ||
+      0
   );
 
   const platforms = getPlatformValues(campaignDoc);
@@ -572,7 +659,14 @@ function mapApiCampaign(source: any): CampaignData {
       campaignDoc.status,
       source?.status
     ),
-    brandId: getFirstString(campaignDoc.brandId, source?.brandId),
+    brandId: getFirstString(
+      campaignDoc.brandId,
+      campaignDoc.brand?._id,
+      campaignDoc.brand?.brandId,
+      source?.brandId,
+      source?.brand?._id,
+      source?.brand?.brandId
+    ),
     brandName: getFirstString(
       campaignDoc.brandName,
       source?.brandName,
@@ -582,17 +676,17 @@ function mapApiCampaign(source: any): CampaignData {
     brandLogoUrl: getBrandLogoUrl(campaignDoc),
     applications: Number(
       campaignDoc.applicantCount ||
-      campaignDoc.applicationsCount ||
-      source?.applicantCount ||
-      0
+        campaignDoc.applicationsCount ||
+        source?.applicantCount ||
+        0
     ),
     timeline: { startDate, endDate },
     isActive: Number(campaignDoc.isActive ?? 1),
     isApproved: Number(
       campaignDoc.isApproved ??
-      campaignDoc.hasApproved ??
-      source?.hasApproved ??
-      1
+        campaignDoc.hasApproved ??
+        source?.hasApproved ??
+        1
     ),
     isContracted: Number(
       campaignDoc.isContracted ?? (resolvedContractId ? 1 : 0)
@@ -758,6 +852,181 @@ function CampaignCardSkeleton() {
   );
 }
 
+
+function AppliedSidebarSkeleton() {
+  return (
+    <div className="relative flex h-[calc(100dvh-13rem)] min-h-[38rem] w-full items-stretch overflow-hidden bg-white">
+      <section className="w-[22.0625rem] shrink-0 overflow-hidden pr-0">
+        <div className="flex flex-col gap-[1.5rem]">
+          {[1, 2].map((item) => (
+            <CampaignCardSkeleton key={item} />
+          ))}
+        </div>
+      </section>
+
+      <div className="flex w-[0.625rem] shrink-0 items-start justify-center px-[0.0625rem] pt-[2rem]">
+        <div className="h-[4.8125rem] flex-1 rounded-[6.25rem] bg-[#E6E6E6]" />
+      </div>
+
+      <section className="relative min-w-0 flex-1 overflow-hidden pb-[4rem]">
+        <div className="relative flex h-full w-full flex-col overflow-hidden rounded-t-[1rem] rounded-b-none border border-[#E6E6E6] bg-white">
+          <div className="min-h-0 flex-1 overflow-y-auto px-[1.25rem] pb-[5rem] pt-[1.25rem]">
+            <div className="flex w-full flex-col gap-[1.75rem]">
+              <div className="flex items-center gap-4">
+                <SkeletonCircle className="h-[6.25rem] w-[6.25rem]" />
+                <div className="min-w-0 flex-1">
+                  <SkeletonLoader className="h-7 w-1/2 rounded-md" />
+                  <SkeletonLoader className="mt-3 h-4 w-1/3 rounded-md" />
+                </div>
+                <SkeletonLoader className="h-10 w-40 rounded-[0.75rem]" />
+              </div>
+
+              <div className="flex gap-6 border-b border-[#E6E6E6] pb-3">
+                <SkeletonLoader className="h-5 w-20 rounded-md" />
+                <SkeletonLoader className="h-5 w-28 rounded-md" />
+              </div>
+
+              <SkeletonLoader className="h-[5.5rem] w-full rounded-[0.75rem]" />
+              <SkeletonLoader className="h-[16rem] w-full rounded-[0.75rem]" />
+              <SkeletonLoader className="h-[14rem] w-full rounded-[0.75rem]" />
+            </div>
+          </div>
+        </div>
+
+        <div className="absolute bottom-0 left-0 right-[0.0625rem] z-30 flex h-[4rem] w-auto items-center justify-between border-y border-l border-[#E6E6E6] bg-white px-[1.25rem] shadow-[0_24px_40px_-4px_rgba(0,0,0,0.10),0_0_12px_0_rgba(0,0,0,0.08)]">
+          <SkeletonLoader className="h-5 w-20 rounded-md" />
+          <div className="flex items-center gap-4">
+            <SkeletonLoader className="h-5 w-20 rounded-md" />
+            <SkeletonLoader className="h-10 w-28 rounded-[0.75rem]" />
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AppliedCampaignSplitView({
+  campaigns,
+  selectedCampaignId,
+  setSelectedCampaignId,
+  getCampaignHref,
+  openCampaignThread,
+}: {
+  campaigns: CampaignData[];
+  selectedCampaignId: string;
+  setSelectedCampaignId: (campaignId: string) => void;
+  getCampaignHref: (campaign: CampaignData) => string;
+  openCampaignThread: (campaign: CampaignData) => void;
+}) {
+  const router = useRouter();
+
+  const selectedCampaign =
+    campaigns.find((campaign) => campaign.id === selectedCampaignId) ||
+    campaigns[0] ||
+    null;
+
+  return (
+    <div className="relative flex h-[calc(100dvh-13rem)] min-h-[38rem] w-full items-stretch overflow-hidden bg-white">
+      <section className="w-[22.0625rem] shrink-0 overflow-y-auto pr-0 [scrollbar-width:thin] [scrollbar-color:#E6E6E6_transparent] [&::-webkit-scrollbar]:w-[0.375rem] [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:min-h-[4.8125rem] [&::-webkit-scrollbar-thumb]:rounded-[var(--Sizes-Border-Radius-Pill,6.25rem)] [&::-webkit-scrollbar-thumb]:bg-[#E6E6E6]">
+        <div className="flex flex-col gap-[1.5rem] pb-8">
+          {campaigns.map((campaign) => (
+            <CampaignCard
+              key={campaign.id}
+              title={campaign.title}
+              description={campaign.description}
+              imageUrl={campaign.imageUrls[0]}
+              imageUrls={campaign.imageUrls}
+              brandName={campaign.brandName}
+              brandLogoUrl={campaign.brandLogoUrl}
+              campaignGoal={campaign.campaignGoalValues[0]}
+              category={campaign.category}
+              ageLabel={compactAgeLabel(campaign.targetAgeGroupValues)}
+              gender={campaign.gender}
+              countries={campaign.targetCountryValues}
+              budget={campaign.budgetMax}
+              viewedCount={campaign.applications}
+              hasApplied={campaign.hasApplied === 1}
+              isAppliedCard
+              appliedDate={campaign.appliedDate}
+              onCardClick={() => setSelectedCampaignId(campaign.id)}
+              onApply={() => undefined}
+              onSave={() => undefined}
+              onDeleteApplied={() => {
+                // add withdraw/delete applied campaign API here
+              }}
+              onMore={() => setSelectedCampaignId(campaign.id)}
+              className={
+                selectedCampaign?.id === campaign.id
+                  ? "ring-1 ring-[#1A1A1A]/10"
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+      </section>
+
+      <div
+        className={[
+          "flex w-[0.625rem] shrink-0 items-start justify-center",
+          "gap-[0.5rem] self-stretch",
+          "px-[0.0625rem] pb-[0.0625rem] pt-[2rem]",
+        ].join(" ")}
+      >
+        <div className="h-[4.8125rem] flex-1 rounded-[var(--Sizes-Border-Radius-Pill,6.25rem)] bg-[#E6E6E6]" />
+      </div>
+
+      <section className="sticky top-0 h-full min-h-0 min-w-0 flex-1 overflow-hidden pb-[4rem]">
+        {selectedCampaign ? (
+          <div className="h-full min-h-0 overflow-hidden">
+            <SidebarCampaign
+              campaignId={selectedCampaign.id}
+              invitationId={selectedCampaign.contractId || selectedCampaign.id}
+              invitationStatus="accepted"
+              invitationBrandLogo={selectedCampaign.brandLogoUrl}
+              invitationAppliedAt={selectedCampaign.appliedDate}
+              onInvitationAccepted={() => undefined}
+              embedded
+            />
+          </div>
+        ) : (
+          <div className="flex h-full items-center justify-center rounded-[1.5rem] border border-[#E6E6E6] bg-white text-sm text-[#969696]">
+            Select an applied campaign to view campaign details.
+          </div>
+        )}
+
+        <div className="absolute bottom-0 left-0 right-[0.0625rem] z-30 flex h-[4rem] w-auto flex-wrap items-center content-center justify-between border-y border-l border-[#E6E6E6] bg-white px-[1.25rem] shadow-[0_24px_40px_-4px_rgba(0,0,0,0.10),0_0_12px_0_rgba(0,0,0,0.08)]">
+          <button
+            type="button"
+            className="flex h-[2.5rem] items-center justify-center gap-[0.25rem] rounded-[0.75rem] px-[0.5rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#1A1A1A]"
+          >
+            ♡ Save
+          </button>
+
+          <div className="ml-auto flex items-center gap-[1rem]">
+            <button
+              type="button"
+              disabled={!selectedCampaign}
+              onClick={() => selectedCampaign && openCampaignThread(selectedCampaign)}
+              className="flex h-[2.5rem] w-[7rem] items-center justify-center rounded-[0.75rem] px-[0.5rem] text-[0.875rem] font-semibold leading-[1.25rem] text-[#1A1A1A] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Message
+            </button>
+
+            <button
+              type="button"
+              disabled={!selectedCampaign}
+              onClick={() => selectedCampaign && router.push(getCampaignHref(selectedCampaign))}
+              className="flex h-[2.5rem] w-[7rem] items-center justify-center rounded-[0.75rem] bg-[#1A1A1A] px-[0.5rem] text-[0.875rem] font-semibold leading-[1.25rem] text-white disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#B8B8B8] disabled:opacity-60"
+            >
+              View
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function MyCampaignsContent({
   variant = "all",
 }: {
@@ -777,6 +1046,7 @@ export default function MyCampaignsContent({
   const [dateFilter, setDateFilter] =
     useState<DateFilterValue>(DEFAULT_DATE_FILTER);
   const [aiCreated, setAiCreated] = useState(false);
+  const [selectedAppliedCampaignId, setSelectedAppliedCampaignId] = useState("");
 
   const fetchCampaigns = useCallback(async () => {
     setIsLoading(true);
@@ -828,8 +1098,8 @@ export default function MyCampaignsContent({
     } catch (error: any) {
       setFetchError(
         error?.response?.data?.message ||
-        error?.message ||
-        "Failed to load campaigns."
+          error?.message ||
+          "Failed to load campaigns."
       );
       setCampaigns([]);
     } finally {
@@ -913,6 +1183,26 @@ export default function MyCampaignsContent({
     aiCreated,
   ]);
 
+  useEffect(() => {
+    if (variant !== "applied") {
+      setSelectedAppliedCampaignId("");
+      return;
+    }
+
+    if (!filteredCampaigns.length) {
+      setSelectedAppliedCampaignId("");
+      return;
+    }
+
+    const selectedStillExists = filteredCampaigns.some(
+      (campaign) => campaign.id === selectedAppliedCampaignId
+    );
+
+    if (!selectedAppliedCampaignId || !selectedStillExists) {
+      setSelectedAppliedCampaignId(filteredCampaigns[0].id);
+    }
+  }, [filteredCampaigns, selectedAppliedCampaignId, variant]);
+
   const hasActiveFilters =
     Boolean(searchInput) ||
     campaignType !== "all" ||
@@ -930,12 +1220,51 @@ export default function MyCampaignsContent({
     )}?title=${encodeURIComponent(campaign.title || "Campaign Details")}`;
   };
 
+  const openCampaignThread = useCallback(
+    async (campaign: CampaignData) => {
+      try {
+        const influencerId = getInfluencerId();
+
+        if (!campaign.brandId || !influencerId || !campaign.id) {
+          setFetchError(
+            "Unable to open inbox. Missing brand, influencer, or campaign details."
+          );
+          return;
+        }
+
+        const response = await api.post("/emails/threads", {
+          brandId: campaign.brandId,
+          influencerId,
+          campaignId: campaign.id,
+          subject: campaign.title || "Campaign conversation",
+          type: "campaign",
+          source: "influencer_my_campaigns",
+        });
+
+        const threadId = getThreadIdFromResponse(response);
+
+        if (!threadId) {
+          throw new Error("Thread created, but threadId was not returned.");
+        }
+
+        router.push(`/influencer/inbox/${threadId}`);
+      } catch (error: any) {
+        setFetchError(
+          error?.response?.data?.message ||
+            error?.message ||
+            "Failed to open brand conversation."
+        );
+      }
+    },
+    [router]
+  );
+
   return (
     <SkeletonProvider>
       <div className="min-h-screen bg-white">
         <MyCampaignNavbarGate />
-        <div className="mx-auto max-w-full px-6 py-10">
 
+        <div className="mx-auto max-w-full px-6 py-10">
           {fetchError ? (
             <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               <div className="flex items-center gap-3">
@@ -969,11 +1298,15 @@ export default function MyCampaignsContent({
 
           <div className="mt-8">
             {isLoading ? (
-              <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-3">
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <CampaignCardSkeleton key={index} />
-                ))}
-              </div>
+              variant === "applied" ? (
+                <AppliedSidebarSkeleton />
+              ) : (
+                <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-3">
+                  {Array.from({ length: 6 }).map((_, index) => (
+                    <CampaignCardSkeleton key={index} />
+                  ))}
+                </div>
+              )
             ) : filteredCampaigns.length === 0 ? (
               <div className="flex flex-col items-center justify-center rounded-2xl border border-[#E6E6E6] bg-white px-6 py-24 text-center">
                 <h3 className="text-lg font-semibold text-[#1A1A1A]">
@@ -1001,12 +1334,20 @@ export default function MyCampaignsContent({
                   </button>
                 ) : null}
               </div>
+            ) : variant === "applied" ? (
+              <AppliedCampaignSplitView
+                campaigns={filteredCampaigns}
+                selectedCampaignId={selectedAppliedCampaignId}
+                setSelectedCampaignId={setSelectedAppliedCampaignId}
+                getCampaignHref={getCampaignHref}
+                openCampaignThread={openCampaignThread}
+              />
             ) : (
               <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-3">
                 {filteredCampaigns.map((campaign) => {
                   const cardStatus = getCardStatus(campaign);
 
-                  if (variant === "all") {
+                  if (MY_CAMPAIGN_CARD_VARIANTS.has(variant)) {
                     return (
                       <MyCampaignCard
                         key={campaign.id}
@@ -1024,11 +1365,19 @@ export default function MyCampaignsContent({
                         budget={campaign.budgetMax}
                         timelineStartDate={campaign.timeline.startDate}
                         timelineEndDate={campaign.timeline.endDate}
-                        footerNote={`${campaign.currentMilestoneName || "Milestone Name"
-                          } submission in ${campaign.daysLeft || 0} days`}
+                        footerNote={
+                          campaign.daysLeft > 0
+                            ? `${
+                                campaign.currentMilestoneName ||
+                                "Milestone Name"
+                              } submission in ${campaign.daysLeft} days`
+                            : ""
+                        }
                         onCardClick={() => router.push(getCampaignHref(campaign))}
-                        onManageCampaign={() => router.push(getCampaignHref(campaign))}
-                        onMessageClick={() => router.push("/influencer/inbox")}
+                        onManageCampaign={() =>
+                          router.push(getCampaignHref(campaign))
+                        }
+                        onMessageClick={() => openCampaignThread(campaign)}
                         onMoreClick={() => undefined}
                       />
                     );
@@ -1051,10 +1400,10 @@ export default function MyCampaignsContent({
                       budget={campaign.budgetMax}
                       viewedCount={campaign.applications}
                       hasApplied={campaign.hasApplied === 1}
-                      isAppliedCard={variant === "applied"}
+                      isAppliedCard={APPLIED_STYLE_CARD_VARIANTS.has(variant)}
                       appliedDate={campaign.appliedDate}
                       onCardClick={
-                        variant === "applied"
+                        APPLIED_STYLE_CARD_VARIANTS.has(variant)
                           ? undefined
                           : () => router.push(getCampaignHref(campaign))
                       }
