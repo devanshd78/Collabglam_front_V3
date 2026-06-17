@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Award,
   BadgeCheck,
@@ -254,6 +254,9 @@ const defaultFilters: Filters = {
   limit: FRONTEND_PAGE_SIZE,
 };
 
+const BROWSE_STATE_CACHE_KEY = "collabglam.youtubeBrowseState.v1";
+const BROWSE_STATE_TTL_MS = 30 * 60 * 1000;
+
 const YOUTUBE_CATEGORIES = [
   "Film & Animation",
   "Autos & Vehicles",
@@ -445,104 +448,170 @@ function VideoThumbnail({ src, title }: { src?: string; title?: string }) {
 }
 
 
-const CREATOR_SEARCH_LOADING_STEPS = [
-  {
-    animal: "🦊",
-    title: "Hold on, we’re searching YouTube creators",
-    subtitle:
-      "CollabGlam is matching your brand with creators who can tell the right story.",
-  },
-  {
-    animal: "🦋",
-    title: "Scanning channels, niches, and recent uploads",
-    subtitle:
-      "We’re checking creator activity, content style, and campaign-fit signals.",
-  },
-  {
-    animal: "🦚",
-    title: "Looking for creators with real collaboration potential",
-    subtitle:
-      "Not just subscribers — we’re sorting by relevance, engagement, and brand safety.",
-  },
-  {
-    animal: "🐼",
-    title: "Building a smarter influencer shortlist",
-    subtitle:
-      "We’re organizing creators so the best-fit profiles are easier to review.",
-  },
-  {
-    animal: "🐬",
-    title: "Preparing media-kit insights",
-    subtitle:
-      "Metrics, recent posts, contact signals, and scores are being assembled.",
-  },
-  {
-    animal: "🦄",
-    title: "Almost ready — polishing your discovery list",
-    subtitle:
-      "Your brand-influencer collaboration matches will appear in a few moments.",
-  },
-];
+const DEFAULT_CAMPAIGN_LOADING_BACKGROUNDS = ["🎥", "🎯", "🤝", "📊", "✨", "🔍"];
 
-function CreatorSearchLoader() {
-  const [stepIndex, setStepIndex] = useState(0);
+function getCampaignLoadingBackgrounds(topic?: string) {
+  const value = String(topic || "").toLowerCase();
+
+  if (/drone|camera|gopro|video|film|photo|vlog/.test(value)) {
+    return ["🚁", "📹", "🎬", "📡", "🛰️", "✨"];
+  }
+
+  if (/beauty|makeup|skin|hair|fashion|style|glam/.test(value)) {
+    return ["💄", "✨", "👜", "👗", "💅", "🌟"];
+  }
+
+  if (/tech|phone|mobile|app|ai|gadget|software|laptop/.test(value)) {
+    return ["💻", "📱", "⚡", "🤖", "🎧", "🔍"];
+  }
+
+  if (/food|kitchen|coffee|recipe|restaurant|snack/.test(value)) {
+    return ["🍽️", "☕", "🥗", "🍳", "🛒", "✨"];
+  }
+
+  if (/fitness|gym|health|sport|wellness|yoga/.test(value)) {
+    return ["🏋️", "💪", "🧘", "⌚", "🥤", "⚡"];
+  }
+
+  if (/home|decor|clean|diy|tool|garden|cleaner/.test(value)) {
+    return ["🏠", "🛠️", "🧼", "🪴", "📦", "✨"];
+  }
+
+  return DEFAULT_CAMPAIGN_LOADING_BACKGROUNDS;
+}
+
+function getCreatorSearchLoadingMessages(topicLabel: string) {
+  return [
+    `Hold on, we are searching creators for ${topicLabel}.`,
+    "Scanning YouTube channels and creator signals.",
+    "Checking recent uploads and audience authenticity.",
+    "Matching tier, country, and campaign relevance.",
+    "Filtering creators with stronger brand fit.",
+    "Almost ready — polishing your creator shortlist.",
+  ];
+}
+
+function CreatorSearchLoader({ topic }: { topic?: string }) {
+  const backgrounds = useMemo(() => getCampaignLoadingBackgrounds(topic), [topic]);
+  const topicLabel = String(topic || "your campaign").trim() || "your campaign";
+  const messages = useMemo(() => getCreatorSearchLoadingMessages(topicLabel), [topicLabel]);
+  const [backgroundIndex, setBackgroundIndex] = useState(0);
+  const [messageIndex, setMessageIndex] = useState(0);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setStepIndex((current) =>
-        (current + 1) % CREATOR_SEARCH_LOADING_STEPS.length,
-      );
-    }, 2200);
+      setBackgroundIndex((current) => (current + 1) % backgrounds.length);
+    }, 950);
 
     return () => window.clearInterval(timer);
-  }, []);
+  }, [backgrounds.length]);
 
-  const step = CREATOR_SEARCH_LOADING_STEPS[stepIndex];
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setMessageIndex((current) => (current + 1) % messages.length);
+    }, 1850);
+
+    return () => window.clearInterval(timer);
+  }, [messages.length]);
+
+  const activeBackground = backgrounds[backgroundIndex] || "✨";
+  const activeMessage = messages[messageIndex] || messages[0];
 
   return (
-    <div className="px-6 py-12">
-      <div className="mx-auto max-w-[680px] overflow-hidden rounded-[30px] border border-[#eadfd3] bg-gradient-to-br from-white via-[#fffaf3] to-[#fff1d7] p-7 text-center shadow-[0_22px_70px_rgba(72,52,32,0.12)]">
-        <div className="relative mx-auto mb-5 flex h-28 w-28 items-center justify-center">
-          <div className="absolute inset-0 rounded-full bg-[#ffe9b8] opacity-70 blur-xl animate-pulse" />
-          <div className="absolute h-28 w-28 rounded-full border border-[#f0ddc8]" />
-          <div className="absolute h-20 w-20 rounded-full border border-dashed border-[#e1c9af] animate-spin" />
-          <div className="relative flex h-20 w-20 items-center justify-center rounded-full border border-[#e8d7c5] bg-white text-4xl shadow-sm animate-bounce">
-            {step.animal}
+    <div className="px-6 py-20 text-center">
+      <style jsx global>{`
+        @keyframes cgStaticMagnifierFloat {
+          0%, 100% {
+            transform: translateY(0) scale(1);
+          }
+          50% {
+            transform: translateY(-3px) scale(1.015);
+          }
+        }
+
+        @keyframes cgStaticMagnifierScan {
+          0% {
+            transform: translateX(-108px);
+            opacity: 0;
+          }
+          15% {
+            opacity: 0.75;
+          }
+          85% {
+            opacity: 0.75;
+          }
+          100% {
+            transform: translateX(108px);
+            opacity: 0;
+          }
+        }
+
+        @keyframes cgStaticMagnifierGlow {
+          0%, 100% {
+            opacity: 0.28;
+            transform: scale(0.94);
+          }
+          50% {
+            opacity: 0.48;
+            transform: scale(1.08);
+          }
+        }
+
+        @keyframes cgLoaderTextFade {
+          0% {
+            opacity: 0;
+            transform: translateY(5px);
+          }
+          18%, 82% {
+            opacity: 1;
+            transform: translateY(0);
+          }
+          100% {
+            opacity: 0;
+            transform: translateY(-4px);
+          }
+        }
+      `}</style>
+
+      <div className="mx-auto flex min-h-[270px] max-w-[760px] flex-col items-center justify-center">
+        <div className="relative mb-8 h-[150px] w-[260px]">
+          <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-[#c9cbc9] to-transparent" />
+          <div className="absolute left-1/2 top-1/2 h-[126px] w-[126px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#e5e7e5] shadow-[0_18px_45px_rgba(0,0,0,0.12)]" />
+          <div
+            className="absolute left-1/2 top-1/2 h-[146px] w-[146px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#eef0ee]"
+            style={{ animation: "cgStaticMagnifierGlow 1.8s ease-in-out infinite" }}
+          />
+
+          <div
+            className="absolute left-1/2 top-1/2 h-[110px] w-[110px] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-full border border-[#d7dad7] bg-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6)]"
+            style={{ animation: "cgStaticMagnifierFloat 1.7s ease-in-out infinite" }}
+          >
+            <div className="absolute inset-0 grid place-items-center text-[56px] opacity-[0.14] transition-all duration-500">
+              <span key={activeBackground}>{activeBackground}</span>
+            </div>
+
+            <div className="absolute left-1/2 top-1/2 h-[74px] w-[74px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-[#dfe1df] bg-[#f7f8f7]/86" />
+
+            <div className="absolute left-1/2 top-1/2 h-[78px] w-[1px] -translate-y-1/2 bg-[#9ea29e]/70 shadow-[0_0_18px_rgba(120,124,120,0.36)]" style={{ animation: "cgStaticMagnifierScan 1.55s ease-in-out infinite" }} />
+
+            <Search className="absolute left-1/2 top-1/2 z-10 h-11 w-11 -translate-x-1/2 -translate-y-1/2 text-[#7b807b]" strokeWidth={2.2} />
           </div>
+
+          <span className="absolute left-[calc(50%+34px)] top-[calc(50%+38px)] h-[46px] w-[10px] rotate-[-45deg] rounded-full bg-[#7b807b] shadow-[0_8px_16px_rgba(0,0,0,0.12)]" />
         </div>
 
-        <div className="inline-flex items-center gap-2 rounded-full border border-[#eadccd] bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[#8a6f55]">
-          <span className="h-2 w-2 rounded-full bg-[#25c55a] animate-pulse" />
+        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#9a907f]">
           CollabGlam discovery engine
-        </div>
-
-        <h3 className="mt-5 text-[22px] font-semibold text-black">
-          {step.title}
-        </h3>
-        <p className="mx-auto mt-3 max-w-[540px] text-sm leading-6 text-[#776b62]">
-          {step.subtitle}
         </p>
-
-        <div className="mx-auto mt-7 flex max-w-[420px] items-center gap-2">
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#eee2d8]">
-            <div className="h-full w-2/3 rounded-full bg-black animate-pulse" />
-          </div>
-          <span className="text-xs font-medium text-[#8a8179]">Searching</span>
-        </div>
-
-        <div className="mt-5 flex justify-center gap-2">
-          {CREATOR_SEARCH_LOADING_STEPS.map((_, index) => (
-            <span
-              key={index}
-              className={`h-2 rounded-full transition-all duration-300 ${
-                index === stepIndex ? "w-7 bg-black" : "w-2 bg-[#d9cabd]"
-              }`}
-            />
-          ))}
-        </div>
-
-        <p className="mt-5 text-xs text-[#9b8d82]">
-          We are a brand–influencer collaboration platform, curating creators for your campaign.
+        <h3 className="mt-3 text-[22px] font-semibold text-black">
+          Finding creators for {topicLabel}
+        </h3>
+        <p
+          key={messageIndex}
+          className="mx-auto mt-3 max-w-[520px] text-sm leading-6 text-[#71685c]"
+          style={{ animation: "cgLoaderTextFade 1.85s ease-in-out both" }}
+        >
+          {activeMessage}
         </p>
       </div>
     </div>
@@ -566,6 +635,31 @@ function formatDate(value?: string) {
     month: "short",
     year: "numeric",
   });
+}
+
+function getCreatorAuthenticityScore(creator: YouTubeCreator) {
+  const candidates = [
+    (creator as any).audienceAuthenticity,
+    (creator as any).authenticityScore,
+    creator.scores?.authenticityScore,
+    (creator as any).stats?.authenticityScore,
+  ];
+
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isFinite(value) && value > 0) {
+      return Math.max(0, Math.min(100, Math.round(value)));
+    }
+  }
+
+  return null;
+}
+
+function getAuthenticityColorClass(value: number | null) {
+  if (value === null) return "text-[#111111]";
+  if (value >= 75) return "text-[#16803a]";
+  if (value >= 35) return "text-[#b7791f]";
+  return "text-[#dc2626]";
 }
 
 function trimText(value?: string, limit = 150) {
@@ -795,33 +889,17 @@ async function fetchBrandMediaKit(
   });
 
   const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(getApiUrl(`/youtube-data/media-kit/${channelId}${query}`), {
+    method: "GET",
+    credentials: "include",
+  });
+  const data = await res.json().catch(() => ({}));
 
-  const requestMediaKit = async (path: string) => {
-    const response = await fetch(getApiUrl(path), {
-      method: "GET",
-      credentials: "include",
-    });
-    const payload = await response.json().catch(() => ({}));
-    return { response, payload };
-  };
-
-  // New separate media-kit API.
-  let { response, payload } = await requestMediaKit(
-    `/youtube-data/media-kit/${channelId}${query}`,
-  );
-
-  // Fallback for servers that still have the older route only.
-  if (response.status === 404) {
-    ({ response, payload } = await requestMediaKit(
-      `/youtube-data/creators/${channelId}/media-kit${query}`,
-    ));
+  if (!res.ok || data.success === false) {
+    throw new Error(data.error || "Failed to load media kit");
   }
 
-  if (!response.ok || payload.success === false) {
-    throw new Error(payload.error || "Failed to load media kit");
-  }
-
-  return payload.data as BrandMediaKitData;
+  return data.data as BrandMediaKitData;
 }
 
 function hasSearchCriteria(
@@ -1312,15 +1390,13 @@ function MediaKitDrawer({
 }
 
 export default function YouTubeBrowse() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const campaignId = searchParams.get("campaignId") || "";
 
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [allCreators, setAllCreators] = useState<YouTubeCreator[]>([]);
   const [frontendPage, setFrontendPage] = useState(1);
-  const [selectedCreator, setSelectedCreator] = useState<YouTubeCreator | null>(
-    null,
-  );
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showTierDropdown, setShowTierDropdown] = useState(false);
@@ -1330,6 +1406,65 @@ export default function YouTubeBrowse() {
   const categoryDropdownRef = useRef<HTMLDivElement | null>(null);
   const filterDropdownRef = useRef<HTMLDivElement | null>(null);
   const tierDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const cached = window.sessionStorage.getItem(BROWSE_STATE_CACHE_KEY);
+      if (!cached) return;
+
+      const parsed = JSON.parse(cached);
+      const createdAt = Number(parsed?.createdAt || 0);
+      if (!createdAt || Date.now() - createdAt > BROWSE_STATE_TTL_MS) {
+        window.sessionStorage.removeItem(BROWSE_STATE_CACHE_KEY);
+        return;
+      }
+
+      if (Array.isArray(parsed?.creators) && parsed.creators.length) {
+        setAllCreators(parsed.creators);
+      }
+
+      if (parsed?.filters && typeof parsed.filters === "object") {
+        setFilters((prev) => ({ ...prev, ...parsed.filters }));
+      }
+
+      const cachedPage = Number(parsed?.frontendPage || 1);
+      if (Number.isFinite(cachedPage) && cachedPage > 0) {
+        setFrontendPage(cachedPage);
+      }
+    } catch (error) {
+      window.sessionStorage.removeItem(BROWSE_STATE_CACHE_KEY);
+    }
+  }, []);
+
+  function openMediaKitPage(creator: YouTubeCreator) {
+    if (!creator.channelId) return;
+
+    const params = new URLSearchParams({
+      channelId: creator.channelId,
+      returnTo: "browse",
+    });
+
+    if (campaignId) params.set("campaignId", campaignId);
+    if (filters.keyword) params.set("keyword", filters.keyword);
+    if (filters.category) params.set("category", filters.category);
+    if (filters.country) params.set("country", filters.country);
+
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem(
+        BROWSE_STATE_CACHE_KEY,
+        JSON.stringify({
+          creators: allCreators,
+          filters,
+          frontendPage,
+          createdAt: Date.now(),
+        }),
+      );
+    }
+
+    router.push(`/brand/media-kit?${params.toString()}`);
+  }
 
   const activeFiltersCount = useMemo(() => {
     let count = 0;
@@ -1796,7 +1931,7 @@ export default function YouTubeBrowse() {
         </div>
 
         {loading ? (
-          <CreatorSearchLoader />
+          <CreatorSearchLoader topic={filters.keyword || filters.category || "your campaign"} />
         ) : creators.length === 0 ? (
           <div className="px-6 py-14 text-center text-[#777]">
             {hasSearchCriteria(filters, campaignId)
@@ -1805,21 +1940,25 @@ export default function YouTubeBrowse() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] border-collapse">
+            <table className="w-full min-w-[860px] border-collapse">
               <thead>
                 <tr className="bg-[#faf7f2] text-left text-xs uppercase tracking-wide text-[#777]">
-                  <th className="px-5 py-4">Creator</th>
+                  <th className="px-5 py-4">Channel</th>
                   <th className="px-5 py-4">Subscribers</th>
-                  <th className="px-5 py-4">Category</th>
+                  <th className="px-5 py-4">Tier</th>
                   <th className="px-5 py-4">Country</th>
-                  <th className="px-5 py-4">Avg views</th>
+                  <th className="px-5 py-4">Authenticity</th>
                   <th className="px-5 py-4">Engagement</th>
-                  <th className="px-5 py-4">Recent upload</th>
                   <th className="px-5 py-4">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {creators.map((creator) => (
+                {creators.map((creator) => {
+                  const authenticityScore = getCreatorAuthenticityScore(creator);
+                  const countryLabel = creator.country || creator.estimatedAudienceCountry || "-";
+                  const tierLabel = getCreatorTierLabel(creator) || "-";
+
+                  return (
                   <tr
                     key={creator.channelId}
                     className="border-t border-[#f0e8df] text-sm text-black"
@@ -1836,48 +1975,25 @@ export default function YouTubeBrowse() {
                           <p className="mt-1 text-xs text-[#777]">
                             {creator.primaryLanguage || "Language unknown"}
                           </p>
-                          {getListingTierText(creator, filters.subscriberTier) ? (
-                            <p
-                              className={`mt-1 text-[11px] font-medium ${getListingTierTextClass(
-                                creator,
-                                filters.subscriberTier,
-                              )}`}
-                            >
-                              {getListingTierText(
-                                creator,
-                                filters.subscriberTier,
-                              )}
-                            </p>
-                          ) : null}
                         </div>
                       </div>
                     </td>
                     <td className="px-5 py-4 font-medium">
                       {formatNumber(getSubs(creator))}
                     </td>
-                    <td className="px-5 py-4">
-                      {creator.category || creator.channelCategory || "-"}
-                    </td>
-                    <td className="px-5 py-4">
-                      <p>
-                        {creator.estimatedAudienceCountry ||
-                          creator.country ||
-                          "-"}
-                      </p>
-                      {creator.scores?.audienceCountryConfidence ? (
-                        <p className="mt-1 text-xs text-[#777]">
-                          {creator.scores.audienceCountryConfidence}% confidence
-                        </p>
-                      ) : null}
+                    <td className="px-5 py-4 font-medium">
+                      {tierLabel}
                     </td>
                     <td className="px-5 py-4 font-medium">
-                      {formatNumber(creator.avgViews)}
+                      {countryLabel}
+                    </td>
+                    <td className="px-5 py-4">
+                      <span className={`font-black ${getAuthenticityColorClass(authenticityScore)}`}>
+                        {authenticityScore !== null ? `${authenticityScore}%` : "—"}
+                      </span>
                     </td>
                     <td className="px-5 py-4 font-medium">
                       {creator.engagementRate || 0}%
-                    </td>
-                    <td className="px-5 py-4">
-                      {formatDate(creator.recentUploadDate)}
                     </td>
                     <td className="px-5 py-4">
                       <button
@@ -1886,7 +2002,7 @@ export default function YouTubeBrowse() {
                           setShowCategoryDropdown(false);
                           setShowMoreFilters(false);
                           setShowTierDropdown(false);
-                          setSelectedCreator(creator);
+                          openMediaKitPage(creator);
                         }}
                         className="inline-flex items-center gap-1.5 rounded-full bg-black px-3 py-2 text-[11px] font-semibold leading-none text-white"
                       >
@@ -1895,7 +2011,8 @@ export default function YouTubeBrowse() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1924,12 +2041,6 @@ export default function YouTubeBrowse() {
         </div>
       </div>
 
-      <MediaKitDrawer
-        creator={selectedCreator}
-        open={Boolean(selectedCreator)}
-        onClose={() => setSelectedCreator(null)}
-        filters={filters}
-      />
     </div>
   );
 }
