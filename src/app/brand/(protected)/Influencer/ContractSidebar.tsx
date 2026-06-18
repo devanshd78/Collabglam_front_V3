@@ -2430,9 +2430,6 @@ export default function ContractSidebarExtracted({
     if (!String(contractForm.campaign.productsServicesCovered ?? "").trim()) {
       add("campaign.productsServicesCovered", "Product / Services Covered is required.");
     }
-    if (!String(contractForm.influencer.legalName ?? "").trim()) {
-      add("influencer.legalName", "Influencer legal name is required.");
-    }
     if (!String(contractForm.campaign.campaignTitleOrId ?? "").trim()) {
       add("campaign.campaignTitleOrId", "Campaign Title is required.");
     }
@@ -2986,22 +2983,36 @@ export default function ContractSidebarExtracted({
     [countryLookupOptions, contractForm.campaign.territoryTargetCountry]
   );
 
-  const selectedCampaignCountryTags = useMemo(() => {
-    const selectedIds = Array.isArray(contractForm.campaign.territoryTargetCountryIds)
-      ? contractForm.campaign.territoryTargetCountryIds.map(String).filter(Boolean)
-      : [];
+const selectedCampaignCountryTags = useMemo(() => {
+  const selectedValues = Array.isArray(contractForm.campaign.territoryTargetCountryIds)
+    ? contractForm.campaign.territoryTargetCountryIds.map(String).filter(Boolean)
+    : [];
 
-    if (selectedIds.length && countryLookupOptions.length) {
-      const byId = countryLookupOptions.reduce<Record<string, ContractCountryOption>>((acc, row) => {
-        acc[String(row.id)] = row;
-        return acc;
-      }, {});
-      const names = selectedIds.map((id) => byId[id]?.name).filter(Boolean) as string[];
-      if (names.length) return uniqStrings(names);
-    }
+  const byId = countryLookupOptions.reduce<Record<string, ContractCountryOption>>(
+    (acc, row) => {
+      if (row?.id) acc[String(row.id)] = row;
+      return acc;
+    },
+    {}
+  );
 
-    return csvToTags(getAtPath(contractForm, "campaign.territoryTargetCountry"));
-  }, [contractForm.campaign.territoryTargetCountryIds, contractForm.campaign.territoryTargetCountry, countryLookupOptions]);
+  const namesFromSelected = selectedValues
+    .map((value) => {
+      const matched = byId[value];
+      return matched?.name || value;
+    })
+    .filter(Boolean);
+
+  if (namesFromSelected.length) {
+    return uniqStrings(namesFromSelected);
+  }
+
+  return csvToTags(getAtPath(contractForm, "campaign.territoryTargetCountry"));
+}, [
+  contractForm.campaign.territoryTargetCountryIds,
+  contractForm.campaign.territoryTargetCountry,
+  countryLookupOptions,
+]);
 
   const handleCampaignCountryChange = useCallback((next: string[]) => {
     const byName = countryLookupOptions.reduce<Record<string, ContractCountryOption>>((acc, row) => {

@@ -21,6 +21,8 @@ import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
 import { toast, ToastStyles } from "@/components/ui/toast";
 
 import {
+  apiBrandWalletTopup,
+  apiConfirmBrandWalletTopup,
   apiCreateMilestone,
   apiEditMilestone,
   getApiErrorMessage,
@@ -110,6 +112,104 @@ const GRACE_DAY_OPTIONS: Option[] = [
 
 const labelClass =
   "font-['Inter'] text-xs font-normal leading-4 text-[#969696]";
+
+const PENDING_MILESTONE_STORAGE_PREFIX = "collabglam.pendingMilestone.";
+
+const getSerializableMilestonePayload = (payload: Record<string, any>) => {
+  try {
+    return JSON.parse(JSON.stringify(payload));
+  } catch {
+    return payload;
+  }
+};
+
+const getWalletShortfallFromError = (err: any) => {
+  const data =
+    err?.response?.data?.data ||
+    err?.response?.data ||
+    err?.data?.data ||
+    err?.data ||
+    err ||
+    {};
+
+  const needToAdd = Number(data?.needToAdd || 0);
+
+  if (!Number.isFinite(needToAdd) || needToAdd <= 0) {
+    return null;
+  }
+
+  return {
+    needToAdd,
+    message:
+      data?.message ||
+      err?.response?.data?.message ||
+      err?.message ||
+      "Brand wallet needs additional funds.",
+    walletBalance: Number(data?.walletBalance || 0),
+    escrowBalance: Number(data?.escrowBalance || data?.frozenBalance || 0),
+    frozenBalance: Number(data?.frozenBalance || data?.escrowBalance || 0),
+    usableBalance: Number(data?.usableBalance || data?.walletBalance || 0),
+  };
+};
+
+const buildMilestoneTopupRedirectUrls = ({
+  campaignId,
+  campaignName,
+  pendingKey,
+}: {
+  campaignId: string;
+  campaignName?: string;
+  pendingKey: string;
+}) => {
+  if (typeof window === "undefined") {
+    return {
+      successUrl: "",
+      cancelUrl: "",
+    };
+  }
+
+  const baseUrl = new URL(window.location.href);
+
+  baseUrl.searchParams.delete("stripe_success");
+  baseUrl.searchParams.delete("stripe_cancel");
+  baseUrl.searchParams.delete("session_id");
+  baseUrl.searchParams.delete("topup");
+  baseUrl.searchParams.delete("auto_milestone");
+  baseUrl.searchParams.delete("pending_milestone_key");
+
+  if (campaignId && !baseUrl.searchParams.get("id")) {
+    baseUrl.searchParams.set("id", campaignId);
+  }
+
+  if (campaignName && !baseUrl.searchParams.get("name")) {
+    baseUrl.searchParams.set("name", campaignName);
+  }
+
+  const successUrl = new URL(baseUrl.toString());
+  successUrl.searchParams.set("topup", "success");
+  successUrl.searchParams.set("stripe_success", "1");
+  successUrl.searchParams.set("auto_milestone", "1");
+  successUrl.searchParams.set("pending_milestone_key", pendingKey);
+  successUrl.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}");
+
+  const cancelUrl = new URL(baseUrl.toString());
+  cancelUrl.searchParams.set("topup", "cancelled");
+  cancelUrl.searchParams.set("stripe_cancel", "1");
+  cancelUrl.searchParams.set("auto_milestone", "1");
+  cancelUrl.searchParams.set("pending_milestone_key", pendingKey);
+
+  const successUrlString = successUrl
+    .toString()
+    .replace(
+      "session_id=%7BCHECKOUT_SESSION_ID%7D",
+      "session_id={CHECKOUT_SESSION_ID}"
+    );
+
+  return {
+    successUrl: successUrlString,
+    cancelUrl: cancelUrl.toString(),
+  };
+};
 
 const getPlatformIcon = (platform: string) => {
   const normalized = String(platform || "").toLowerCase();
@@ -615,6 +715,9 @@ export default function AddMilestoneCard({
 
   const [submitting, setSubmitting] = useState(false);
 
+  const autoMilestoneRestoreRunningRef = useRef(false);
+
+
   const isEditMode = mode === "edit";
 
   const rawMilestoneData = milestoneData?.raw || milestoneData || {};
@@ -641,6 +744,157 @@ export default function AddMilestoneCard({
 
   const isAdminMode =
     explicitAdminMode || (!contractId && Boolean(resolvedAdminId) && !isEditMode);
+
+  const startMilestoneShortfallTopup = async ({
+    needToAdd,
+    milestonePayload,
+  }: {
+    needToAdd: number;
+    milestonePayload: Record<string, any>;
+  }) => {
+    if (typeof window === "undefined") return;
+
+    const pendingKey = `${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}`;
+
+    sessionStorage.setItem(
+      `${PENDING_MILESTONE_STORAGE_PREFIX}${pendingKey}`,
+      JSON.stringify({
+        payload: getSerializableMilestonePayload(milestonePayload),
+        createdAt: new Date().toISOString(),
+      })
+    );
+
+    const { successUrl, cancelUrl } = buildMilestoneTopupRedirectUrls({
+      campaignId: String(milestonePayload.campaignId || campaignId || ""),
+      campaignName,
+      pendingKey,
+    });
+
+    const res: any = await apiBrandWalletTopup({
+      brandId: milestonePayload.brandId,
+      amount: needToAdd,
+      currency: "usd",
+      successUrl,
+      cancelUrl,
+    } as any);
+
+    const checkoutUrl =
+      res?.data?.checkoutUrl ??
+      res?.checkoutUrl ??
+      res?.data?.data?.checkoutUrl ??
+      res?.url ??
+      res?.data?.url;
+
+    if (!checkoutUrl) {
+      sessionStorage.removeItem(`${PENDING_MILESTONE_STORAGE_PREFIX}${pendingKey}`);
+      throw new Error("Stripe checkout URL not received");
+    }
+
+    toast({
+      icon: "warning",
+      title: "Brand wallet needs funds",
+      text: `Please add $${Number(needToAdd).toFixed(
+        2
+      )}. The milestone amount will move to escrow automatically after payment.`,
+    });
+
+    window.location.href = checkoutUrl;
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (autoMilestoneRestoreRunningRef.current) return;
+
+    const url = new URL(window.location.href);
+    const shouldAutoCreate = url.searchParams.get("auto_milestone") === "1";
+    const topupStatus = url.searchParams.get("topup");
+    const sessionId = url.searchParams.get("session_id") || "";
+    const pendingKey = url.searchParams.get("pending_milestone_key") || "";
+
+    if (!shouldAutoCreate || topupStatus !== "success" || !sessionId || !pendingKey) {
+      return;
+    }
+
+    if (sessionId === "{CHECKOUT_SESSION_ID}") {
+      toast({
+        icon: "error",
+        title: "Stripe session missing",
+        text: "Stripe returned the placeholder session id. Please keep {CHECKOUT_SESSION_ID} unencoded in the successUrl and try again.",
+      });
+
+      url.searchParams.delete("topup");
+      url.searchParams.delete("stripe_success");
+      url.searchParams.delete("session_id");
+      window.history.replaceState({}, "", url.toString());
+      return;
+    }
+
+    const storageKey = `${PENDING_MILESTONE_STORAGE_PREFIX}${pendingKey}`;
+    const stored = sessionStorage.getItem(storageKey);
+
+    if (!stored) {
+      toast({
+        icon: "error",
+        title: "Milestone not created",
+        text: "Top-up completed, but saved milestone details were not found. Please create the milestone again.",
+      });
+      return;
+    }
+
+    autoMilestoneRestoreRunningRef.current = true;
+
+    const run = async () => {
+      try {
+        const parsed = JSON.parse(stored);
+        const pendingPayload = parsed?.payload;
+
+        if (!pendingPayload?.brandId) {
+          throw new Error("Saved milestone payload is invalid");
+        }
+
+        await apiConfirmBrandWalletTopup({
+          brandId: pendingPayload.brandId,
+          sessionId,
+        });
+
+        await apiCreateMilestone(pendingPayload as any);
+
+        sessionStorage.removeItem(storageKey);
+
+        url.searchParams.delete("topup");
+        url.searchParams.delete("stripe_success");
+        url.searchParams.delete("stripe_cancel");
+        url.searchParams.delete("session_id");
+        url.searchParams.delete("auto_milestone");
+        url.searchParams.delete("pending_milestone_key");
+        window.history.replaceState({}, "", url.toString());
+
+        toast({
+          icon: "success",
+          title: "Milestone created",
+          text: "Funds were added, the milestone was created, and the amount was moved to escrow.",
+        });
+
+        await onSubmit?.();
+        onClose();
+      } catch (err: any) {
+        toast({
+          icon: "error",
+          title: "Milestone not created",
+          text: getApiErrorMessage(
+            err,
+            "Funds were added, but automatic milestone creation failed. Please try creating the milestone again."
+          ),
+        });
+      } finally {
+        autoMilestoneRestoreRunningRef.current = false;
+      }
+    };
+
+    run();
+  }, [onClose, onSubmit]);
 
   useEffect(() => {
     if (!open) return;
@@ -1032,6 +1286,8 @@ export default function AddMilestoneCard({
   };
 
   const handleCreateMilestone = async () => {
+    let pendingMilestonePayload: Record<string, any> | null = null;
+
     try {
       if (!validateForm()) return;
 
@@ -1072,6 +1328,20 @@ export default function AddMilestoneCard({
         draftDate: needDraftFirst ? draftDate : "",
       };
 
+      const milestoneCreatePayload = {
+        brandId,
+        campaignId: campaignId || "",
+        influencerId: influencerId || "",
+        contractId: isAdminMode ? "" : contractId || "",
+        adminId: isAdminMode ? resolvedAdminId : "",
+        source: isAdminMode ? "admin" : "brand",
+        createdByRole: isAdminMode ? "admin" : "brand",
+        createdByModel: isAdminMode ? "Master" : "Brand",
+        ...commonPayload,
+      };
+
+      pendingMilestonePayload = milestoneCreatePayload;
+
       if (isEditMode) {
         await apiEditMilestone({
           milestoneId,
@@ -1085,17 +1355,7 @@ export default function AddMilestoneCard({
           text: "The milestone has been updated successfully.",
         });
       } else {
-        await apiCreateMilestone({
-          brandId,
-          campaignId: campaignId || "",
-          influencerId: influencerId || "",
-          contractId: isAdminMode ? "" : contractId || "",
-          adminId: isAdminMode ? resolvedAdminId : "",
-          source: isAdminMode ? "admin" : "brand",
-          createdByRole: isAdminMode ? "admin" : "brand",
-          createdByModel: isAdminMode ? "Master" : "Brand",
-          ...commonPayload,
-        } as any);
+        await apiCreateMilestone(milestoneCreatePayload as any);
 
         toast({
           icon: "success",
@@ -1107,6 +1367,28 @@ export default function AddMilestoneCard({
       onSubmit?.();
       onClose();
     } catch (err: any) {
+      const walletShortfall = !isEditMode ? getWalletShortfallFromError(err) : null;
+
+      if (walletShortfall && pendingMilestonePayload) {
+        try {
+          await startMilestoneShortfallTopup({
+            needToAdd: walletShortfall.needToAdd,
+            milestonePayload: pendingMilestonePayload,
+          });
+          return;
+        } catch (topupErr: any) {
+          toast({
+            icon: "error",
+            title: "Stripe checkout not started",
+            text: getApiErrorMessage(
+              topupErr,
+              "Failed to start Stripe checkout for the remaining wallet amount."
+            ),
+          });
+          return;
+        }
+      }
+
       const message = getApiErrorMessage(
         err,
         isEditMode ? "Failed to update milestone" : "Failed to create milestone"

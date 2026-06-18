@@ -301,6 +301,37 @@ const isReleasedMilestone = (milestone: any) => {
     );
 };
 
+const isMilestoneSubmittedByInfluencer = (milestone: any) => {
+    const raw = milestone?.raw || milestone || {};
+    const status = String(
+        raw?.submissionStatus ||
+        raw?.milestoneSubmissionStatus ||
+        raw?.status ||
+        milestone?.submissionStatus ||
+        milestone?.milestoneSubmissionStatus ||
+        milestone?.status ||
+        ""
+    )
+        .trim()
+        .toLowerCase();
+
+    return Boolean(
+        raw?.isMilestoneSubmitted === true ||
+        milestone?.isMilestoneSubmitted === true ||
+        raw?.submitted === true ||
+        milestone?.submitted === true ||
+        raw?.submittedAt ||
+        milestone?.submittedAt ||
+        raw?.milestoneSubmittedAt ||
+        milestone?.milestoneSubmittedAt ||
+        raw?.submittedByInfluencerId ||
+        milestone?.submittedByInfluencerId ||
+        status === "submitted" ||
+        status === "milestone_submitted" ||
+        status === "ready_for_brand_review"
+    );
+};
+
 const getContractDoc = (data: any) => {
     return data?.contract || data?.data?.contract || data?.data || data || null;
 };
@@ -1915,9 +1946,21 @@ export default function MilestoneAndDeliverablesTab({
         const source =
             apiMilestones.length > 0 ? apiMilestones : fallbackMilestones;
 
-        return source.map((item: any, index: number) =>
-            item?.raw ? item : normalizeMilestoneRow(item, index, defaultPlatform)
-        );
+        return source.map((item: any, index: number) => {
+            if (item?.raw) {
+                const { raw, ...itemWithoutRaw } = item;
+                return normalizeMilestoneRow(
+                    {
+                        ...raw,
+                        ...itemWithoutRaw,
+                    },
+                    index,
+                    defaultPlatform
+                );
+            }
+
+            return normalizeMilestoneRow(item, index, defaultPlatform);
+        });
     }, [apiMilestones, fallbackMilestones, defaultPlatform]);
 
     const detailedContract = useMemo(() => {
@@ -2351,6 +2394,15 @@ export default function MilestoneAndDeliverablesTab({
                 icon: "info",
                 title: "Milestone already approved",
                 text: "This milestone has already been released.",
+            });
+            return;
+        }
+
+        if (!isMilestoneSubmittedByInfluencer(milestone)) {
+            toast({
+                icon: "warning",
+                title: "Milestone not submitted",
+                text: "Influencer must click Submit Milestone before payment can be released.",
             });
             return;
         }
@@ -2815,10 +2867,13 @@ export default function MilestoneAndDeliverablesTab({
                                     );
 
                                 const milestoneReleased = isReleasedMilestone(item);
+                                const milestoneSubmittedByInfluencer =
+                                    isMilestoneSubmittedByInfluencer(item);
 
                                 const releaseDisabled =
                                     Boolean(releasingMilestoneIds[milestoneHistoryId]) ||
                                     milestoneReleased ||
+                                    !milestoneSubmittedByInfluencer ||
                                     !allDeliverablesApproved;
 
                                 return (
@@ -2881,9 +2936,11 @@ export default function MilestoneAndDeliverablesTab({
                                                         type="button"
                                                         disabled={releaseDisabled}
                                                         title={
-                                                            !allDeliverablesApproved && !milestoneReleased
-                                                                ? "All deliverables and revisions must be approved before release."
-                                                                : undefined
+                                                            !milestoneSubmittedByInfluencer && !milestoneReleased
+                                                                ? "Influencer must click Submit Milestone before payment can be released."
+                                                                : !allDeliverablesApproved && !milestoneReleased
+                                                                    ? "All deliverables and revisions must be approved before release."
+                                                                    : undefined
                                                         }
                                                         onClick={() => handleReleaseMilestone(item)}
                                                         className="flex h-10 min-w-[4.625rem] items-center justify-center rounded-lg bg-[#1A1A1A] px-5 font-['Inter'] text-sm font-medium leading-5 text-white transition hover:bg-black disabled:cursor-not-allowed disabled:bg-[#F5F5F5] disabled:text-[#969696]"
@@ -2892,9 +2949,7 @@ export default function MilestoneAndDeliverablesTab({
                                                             ? "Releasing..."
                                                             : milestoneReleased
                                                                 ? "Released"
-                                                                : allDeliverablesApproved
-                                                                    ? "Release"
-                                                                    : "Release"}
+                                                                : "Release"}
                                                     </button>
 
                                                     <button

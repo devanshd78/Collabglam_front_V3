@@ -236,12 +236,14 @@ const normalizePaymentType = (raw?: string | null): PaymentType => {
 // ─── Route helpers ────────────────────────────────────────────────────────────
 
 function getTabFromPath(pathname: string | null): Tab {
-  const p = pathname ?? "";
+  const p = (pathname ?? "").toLowerCase();
+
   if (p.includes("/brand/influencer/applied")) return "applied";
   if (p.includes("/brand/influencer/shortlisted")) return "shortlisted";
   if (p.includes("/brand/influencer/active")) return "active";
   if (p.includes("/brand/influencer/undecided")) return "undecided";
   if (p.includes("/brand/influencer/rejected")) return "rejected";
+
   return "all";
 }
 
@@ -1592,11 +1594,7 @@ export default function InfluencerList() {
   const [selectedBulkIds, setSelectedBulkIds] = useState<string[]>([]);
   const [bulkInfluencerNames, setBulkInfluencerNames] = useState<string[]>([]);
 
-  const [isPayoutTypeDialogOpen, setIsPayoutTypeDialogOpen] = useState(false);
-  const [payoutDialogMode, setPayoutDialogMode] = useState<"bulk" | "single" | null>(null);
-  const [pendingInfluencerForContract, setPendingInfluencerForContract] = useState<any | null>(null);
-  const [, setCampaignPayoutType] = useState<string>("");
-  const campaignPayoutTypeRef = useRef<string>("");
+  const [campaignPaymentType, setCampaignPaymentType] = useState<PaymentType>(PAYMENT_TYPE.FIXED);
 
   const [bulkSidebarOpen, setBulkSidebarOpen] = useState(false);
   const [bulkTargets, setBulkTargets] = useState<any[]>([]);
@@ -1646,14 +1644,8 @@ export default function InfluencerList() {
       localStorage.getItem("brandID") ||
       localStorage.getItem("brand_id") ||
       "";
-    setBrandId(id || null);
 
-    const savedType = localStorage.getItem("campaignPayoutType") || "";
-    if (savedType) {
-      const normalized = normalizePaymentType(savedType);
-      campaignPayoutTypeRef.current = normalized;
-      setCampaignPayoutType(normalized);
-    }
+    setBrandId(id || null);
   }, []);
 
   useEffect(() => {
@@ -1697,11 +1689,28 @@ export default function InfluencerList() {
         const res: any = await api.get("/campaign/campaignSummary", { params: { id: campaignId } });
         const data = res?.data || res || {};
         const campaignName = data.campaignName || data.productOrServiceName || "";
-        const budgetNum = typeof data.budget === "number" ? data.budget : Number(data.budget ?? NaN);
+        const budgetNum =
+          typeof data.budget === "number" ? data.budget : Number(data.budget ?? NaN);
+
+        const rawCampaignType =
+          data.campaignType ||
+          data.paymentType ||
+          data.payoutType ||
+          data.compensationType ||
+          data.campaignPayoutType ||
+          "";
 
         setCampaignTitle(campaignName);
-        if (!Number.isNaN(budgetNum)) setCampaignBudget(budgetNum);
-        if (data.timeline) setCampaignTimeline(data.timeline);
+
+        if (!Number.isNaN(budgetNum)) {
+          setCampaignBudget(budgetNum);
+        }
+
+        if (data.timeline) {
+          setCampaignTimeline(data.timeline);
+        }
+
+        setCampaignPaymentType(normalizePaymentType(rawCampaignType));
       } catch {
         // ignore
       }
@@ -2096,89 +2105,112 @@ export default function InfluencerList() {
     [brandId, campaignId]
   );
 
-  const openBulkPayoutTypeDialog = useCallback(() => {
-    setPayoutDialogMode("bulk");
-    setPendingInfluencerForContract(null);
-    setIsPayoutTypeDialogOpen(true);
-  }, []);
+  const openBulkContractSidebar = useCallback(async () => {
+    const targets = applicantRows
+      .filter(isBulkSelectable)
+      .filter((row) => selectedBulkIds.includes(row.id))
+      .map((row) => (row as any)?.__raw);
 
-  const openSinglePayoutTypeDialog = useCallback((raw: any) => {
-    setPayoutDialogMode("single");
-    setPendingInfluencerForContract(raw);
-    setIsPayoutTypeDialogOpen(true);
-  }, []);
+    if (!targets.length) {
+      toast({
+        icon: "info",
+        title: "No influencers selected",
+        text: "Select at least one eligible influencer.",
+      });
+      return;
+    }
 
-  const handleSelectPayoutType = useCallback(
-    async (type: PaymentType) => {
-      if (typeof window !== "undefined") localStorage.setItem("campaignPayoutType", type);
-      campaignPayoutTypeRef.current = type;
-      setCampaignPayoutType(type);
-      setIsPayoutTypeDialogOpen(false);
+    setOpeningContractForId("bulk");
 
-      if (payoutDialogMode === "bulk") {
-        const targets = applicantRows
-          .filter(isBulkSelectable)
-          .filter((row) => selectedBulkIds.includes(row.id))
-          .map((row) => (row as any)?.__raw);
+    try {
+      const prefill = await fetchSendContractRequirements({
+        mode: "bulk",
+        influencerIds: selectedBulkIds,
+        paymentType: campaignPaymentType,
+      });
 
-        if (!targets.length) {
-          toast({ icon: "info", title: "No influencers selected", text: "Select at least one eligible influencer." });
-          return;
-        }
+      setBulkTargets(prefill?.influencers?.length ? prefill.influencers : targets);
+      setBulkForcedPaymentType(campaignPaymentType);
+      setBulkContractPrefill(prefill);
+      setContractTarget(prefill?.influencer || targets[0]);
+      setContractTargetMeta(null);
+      setBulkSidebarOpen(true);
+    } catch (e: any) {
+      toast({
+        icon: "error",
+        title: "Could not prepare contract",
+        text:
+          e?.response?.data?.message ||
+          e?.message ||
+          "Required contract fields could not be loaded.",
+      });
+      return;
+    } finally {
+      setOpeningContractForId(null);
+    }
 
-        setOpeningContractForId("bulk");
-        try {
-          const prefill = await fetchSendContractRequirements({ mode: "bulk", influencerIds: selectedBulkIds, paymentType: type });
-          setBulkTargets(prefill?.influencers?.length ? prefill.influencers : targets);
-          setBulkForcedPaymentType(normalizePaymentType(prefill?.paymentType || type));
-          setBulkContractPrefill(prefill);
-          setContractTarget(prefill?.influencer || targets[0]);
-          setContractTargetMeta(null);
-          setBulkSidebarOpen(true);
-        } catch (e: any) {
-          toast({
-            icon: "error",
-            title: "Could not prepare contract",
-            text: e?.response?.data?.message || e?.message || "Required contract fields could not be loaded.",
-          });
-          return;
-        } finally {
-          setOpeningContractForId(null);
-        }
+    try {
+      const res: any = await apiGetfetchBulkInfleuncerId(selectedBulkIds);
+      const list = res?.influencers || res?.data?.influencers || res?.data || [];
+      setBulkInfluencerNames(list.map((inf: any) => inf.name).filter(Boolean));
+    } catch {
+      setBulkInfluencerNames(targets.map((t) => t.name).filter(Boolean));
+    }
+  }, [
+    applicantRows,
+    isBulkSelectable,
+    selectedBulkIds,
+    campaignPaymentType,
+    fetchSendContractRequirements,
+  ]);
 
-        try {
-          const res: any = await apiGetfetchBulkInfleuncerId(selectedBulkIds);
-          const list = res?.influencers || res?.data?.influencers || res?.data || [];
-          setBulkInfluencerNames(list.map((inf: any) => inf.name).filter(Boolean));
-        } catch {
-          setBulkInfluencerNames(targets.map((t) => t.name).filter(Boolean));
-        }
-      } else if (payoutDialogMode === "single" && pendingInfluencerForContract) {
-        const influencerId = getRawInfluencerId(pendingInfluencerForContract);
-        setOpeningContractForId(influencerId || "single");
-        try {
-          const prefill = await fetchSendContractRequirements({ influencerId, paymentType: type, mode: "single" });
-          setContractPrefill(prefill);
-          setContractForcedPaymentType(normalizePaymentType(prefill?.paymentType || type));
-          setContractTarget(prefill?.influencer || pendingInfluencerForContract);
-          setContractTargetMeta(prefill?.contract || contractMetaMap[influencerId] || null);
-          setContractOpen(true);
-        } catch (e: any) {
-          toast({
-            icon: "error",
-            title: "Could not prepare contract",
-            text: e?.response?.data?.message || e?.message || "Required contract fields could not be loaded.",
-          });
-          return;
-        } finally {
-          setOpeningContractForId(null);
-        }
+  const openSingleContractSidebar = useCallback(
+    async (raw: any) => {
+      const influencerId = getRawInfluencerId(raw);
+
+      if (!influencerId) {
+        toast({
+          icon: "error",
+          title: "Influencer not found",
+          text: "Could not identify this influencer.",
+        });
+        return;
       }
 
-      setPendingInfluencerForContract(null);
-      setPayoutDialogMode(null);
+      setOpeningContractForId(influencerId || "single");
+
+      try {
+        const prefill = await fetchSendContractRequirements({
+          influencerId,
+          paymentType: campaignPaymentType,
+          mode: "single",
+        });
+
+        setContractForcedPaymentType(campaignPaymentType);
+        setContractPrefill(prefill);
+        setContractForcedPaymentType(campaignPaymentType);
+        setContractTarget(prefill?.influencer || raw);
+        setContractTargetMeta(prefill?.contract || contractMetaMap[influencerId] || null);
+        setContractOpen(true);
+      } catch (e: any) {
+        toast({
+          icon: "error",
+          title: "Could not prepare contract",
+          text:
+            e?.response?.data?.message ||
+            e?.message ||
+            "Required contract fields could not be loaded.",
+        });
+      } finally {
+        setOpeningContractForId(null);
+      }
     },
-    [payoutDialogMode, pendingInfluencerForContract, applicantRows, isBulkSelectable, selectedBulkIds, contractMetaMap, fetchSendContractRequirements, getRawInfluencerId]
+    [
+      campaignPaymentType,
+      contractMetaMap,
+      fetchSendContractRequirements,
+      getRawInfluencerId,
+    ]
   );
 
   const handleApplicantDecision = async (row: InfluencerRow, action: ApplicantDecisionField) => {
@@ -2330,13 +2362,13 @@ export default function InfluencerList() {
       const isNewContract = !hasExistingContract(raw, meta);
 
       if (isNewContract) {
-        openSinglePayoutTypeDialog(raw);
+        openSingleContractSidebar(raw);
         return;
       }
 
       openContractSidebar(row);
     },
-    [contractMetaMap, openSinglePayoutTypeDialog, openContractSidebar]
+    [contractMetaMap, openContractSidebar]
   );
 
   const resetOwnContractDialog = useCallback(() => {
@@ -2907,7 +2939,7 @@ export default function InfluencerList() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Button variant="outline" onClick={clearSelection}>Clear</Button>
-                      <Button onClick={openBulkPayoutTypeDialog}>
+                      <Button onClick={openBulkContractSidebar}>
                         <PaperPlaneTilt className="mr-2 h-4 w-4" />
                         Bulk Send Contract
                       </Button>
@@ -3141,37 +3173,6 @@ export default function InfluencerList() {
           }
         }}
       />
-
-      <Dialog open={isPayoutTypeDialogOpen} onOpenChange={setIsPayoutTypeDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Select campaign payout type</DialogTitle>
-            <DialogDescription>
-              Choose how this campaign will be structured for the selected influencer{payoutDialogMode === "bulk" ? "s" : ""}.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => handleSelectPayoutType(PAYMENT_TYPE.FIXED)}
-              className="rounded-xl border border-gray-200 p-4 text-left transition hover:bg-gray-50"
-            >
-              <div className="text-sm font-semibold text-gray-900">Fixed</div>
-              <div className="mt-1 text-sm text-gray-500">One fixed payout amount for the entire campaign.</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleSelectPayoutType(PAYMENT_TYPE.MILESTONE)}
-              className="rounded-xl border border-gray-200 p-4 text-left transition hover:bg-gray-50"
-            >
-              <div className="text-sm font-semibold text-gray-900">Milestone</div>
-              <div className="mt-1 text-sm text-gray-500">Payment is released in stages based on deliverables.</div>
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

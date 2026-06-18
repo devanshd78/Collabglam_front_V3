@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Info, Trash, UploadSimple, X } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/buttonComp";
 import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
 import { cn } from "@/lib/utils";
 import {
@@ -57,6 +58,7 @@ export default function InfluencerSignatureModal({
 }: InfluencerSignatureModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<"upload" | "manage">(initialTab);
   const [signatures, setSignatures] = useState<InfluencerSignatureAsset[]>([]);
   const [maxSignatures, setMaxSignatures] = useState(3);
@@ -95,6 +97,10 @@ export default function InfluencerSignatureModal({
       setTab("upload");
     }
   }, [influencerId, selectedSignatureId]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -231,10 +237,10 @@ export default function InfluencerSignatureModal({
     }
   };
 
-  if (!open) return null;
+  if (!open || !mounted || typeof document === "undefined") return null;
 
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[2147483647] flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
       <div className="w-full max-w-[700px] rounded-[20px] bg-white p-5 shadow-2xl">
         <div className="mb-7 flex items-center justify-between">
           <h2 className="text-[24px] font-semibold text-[#1A1A1A]">
@@ -498,6 +504,7 @@ export default function InfluencerSignatureModal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -160,27 +160,27 @@ export default function CampaignNavBar() {
     {
       key: "all influencer",
       label: "All Influencer",
-      href: "/brand/Influencer/all",
+      href: "/brand/influencer/all",
     },
     {
       key: "applied",
       label: "Applied",
-      href: "/brand/Influencer/applied",
+      href: "/brand/influencer/applied",
     },
     {
       key: "active",
       label: "Active",
-      href: "/brand/Influencer/active",
+      href: "/brand/influencer/active",
     },
     {
       key: "shortlisted",
       label: "Shortlisted",
-      href: "/brand/Influencer/shortlisted",
+      href: "/brand/influencer/shortlisted",
     },
     {
       key: "rejected",
       label: "Rejected",
-      href: "/brand/Influencer/rejected",
+      href: "/brand/influencer/rejected",
     },
   ];
 
@@ -201,8 +201,12 @@ export default function CampaignNavBar() {
     rejected: counts.rejected,
   };
 
-  const isActiveHref = (href: string) =>
-    pathname === href || (pathname?.startsWith(href) ?? false);
+  const isActiveHref = (href: string) => {
+    const currentPath = (pathname ?? "").toLowerCase();
+    const targetHref = href.toLowerCase();
+
+    return currentPath === targetHref || currentPath.startsWith(`${targetHref}/`);
+  };
 
   return (
     <header className="flex w-full items-center justify-between border-b border-neutral-200 bg-background px-4 md:px-6">
@@ -260,11 +264,11 @@ export default function CampaignNavBar() {
         })}
       </nav>
 
-      {!isAdminCreatedCampaign ? (
+      {/* {!isAdminCreatedCampaign ? (
         <div className="ml-3 flex shrink-0 items-center">
           <button
             type="button"
-            onClick={() => router.push(withCampaignParams("/brand/influencer/invite"))}
+            onClick={() => router.push(withCampaignParams("/brand/influencer-invitation"))}
             className={[
               "inline-flex items-center justify-center",
               "h-9 md:h-10",
@@ -285,7 +289,7 @@ export default function CampaignNavBar() {
             <span className="sm:hidden">Invite</span>
           </button>
         </div>
-      ) : null}
+      ) : null} */}
     </header>
   );
 }

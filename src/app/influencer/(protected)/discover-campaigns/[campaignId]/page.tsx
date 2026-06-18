@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { toast, ToastStyles } from "@/components/common/toast";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
+  apiApplyToCampaign,
   apiGetfetchCampaignbyId,
   getApiErrorMessage,
 } from "@/app/influencer/services/influencerApi";
@@ -860,6 +862,7 @@ export default function ViewCampaignPage() {
   const [influencerId, setInfluencerId] = useState("");
   const [token, setToken] = useState("");
   const [isOpeningThread, setIsOpeningThread] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
 
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const [activeSlide, setActiveSlide] = useState(0);
@@ -870,11 +873,18 @@ const [previewIndex, setPreviewIndex] = useState<number | null>(null);
     const id =
       localStorage.getItem("influencerId") ||
       localStorage.getItem("influencerID") ||
+      localStorage.getItem("currentInfluencerId") ||
       localStorage.getItem("influencer_id") ||
+      localStorage.getItem("userId") ||
+      localStorage.getItem("user_id") ||
+      localStorage.getItem("_id") ||
       "";
 
     const savedToken =
+      localStorage.getItem("influencer_token") ||
+      localStorage.getItem("influencerToken") ||
       localStorage.getItem("token") ||
+      localStorage.getItem("authToken") ||
       localStorage.getItem("accessToken") ||
       "";
 
@@ -1269,8 +1279,81 @@ const showNextPreviewImage = () => {
     window.open(pdfUrl, "_blank", "noopener,noreferrer");
   };
 
+  const onApplyToCampaign = async () => {
+    if (isApplying || hasAppliedValue === 1) return;
+
+    const currentCampaignId = pickString(campaign.campaignId, campaign._id, campaignId);
+    const currentInfluencerId = pickString(
+      influencer.influencerId,
+      influencer._id,
+      influencerId
+    );
+
+    if (!currentCampaignId || !currentInfluencerId) {
+      toast({
+        icon: "error",
+        title: "Unable to apply",
+        text: "Missing campaign or influencer details.",
+      });
+      return;
+    }
+
+    try {
+      setIsApplying(true);
+
+      const res: any = await apiApplyToCampaign(
+        {
+          campaignId: currentCampaignId,
+          influencerId: currentInfluencerId,
+        },
+        token || undefined
+      );
+
+      const applicantCount = toNumber(
+        res?.data?.data?.applicantCount ??
+          res?.data?.applicantCount ??
+          res?.applicantCount
+      );
+
+      setViewData((prev) => {
+        if (!prev) return prev;
+
+        return {
+          ...prev,
+          influencer: {
+            ...prev.influencer,
+            hasApplied: 1,
+            appliedAt: new Date().toISOString(),
+          },
+          campaign: {
+            ...prev.campaign,
+            appliedInfluencerCount:
+              applicantCount || toNumber(prev.campaign.appliedInfluencerCount) + 1,
+          },
+        };
+      });
+
+      toast({
+        icon: "success",
+        title:
+          res?.data?.message ||
+          res?.message ||
+          "Applied successfully.",
+      });
+    } catch (error) {
+      toast({
+        icon: "error",
+        title: "Failed to apply",
+        text: getApiErrorMessage(error, "Failed to apply to campaign."),
+      });
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
   return (
     <div className={PAGE_WRAP}>
+      <ToastStyles />
       <div className={CONTENT_WRAP}>
         <section className="border-b border-[#E6E6E6] pb-6">
           <div
@@ -1738,9 +1821,11 @@ const showNextPreviewImage = () => {
           ) : (
             <button
               type="button"
-              className="h-11 rounded-[0.75rem] bg-[#1A1A1A] px-8 text-[0.875rem] font-semibold text-white transition hover:bg-black/90"
+              onClick={onApplyToCampaign}
+              disabled={isApplying}
+              className="h-11 rounded-[0.75rem] bg-[#1A1A1A] px-8 text-[0.875rem] font-semibold text-white transition hover:bg-black/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Apply
+              {isApplying ? "Applying..." : "Apply"}
             </button>
           )}
         </div>

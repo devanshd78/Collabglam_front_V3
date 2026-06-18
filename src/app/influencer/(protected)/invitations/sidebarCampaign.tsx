@@ -28,6 +28,7 @@ import SkeletonLoader, {
   SkeletonCircle,
   SkeletonProvider,
 } from "@/components/common/SkeletonLoader";
+import api from "@/lib/api";
 
 function asArray<T = any>(v: any): T[] {
   if (!v) return [];
@@ -91,6 +92,31 @@ function firstNonEmpty(...values: any[]) {
   }
 
   return "";
+}
+
+function pickString(...values: any[]) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+
+    const text = String(value).trim();
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function getThreadIdFromResponse(response: any) {
+  return pickString(
+    response?.data?.data?.threadId,
+    response?.data?.data?._id,
+    response?.data?.data?.id,
+    response?.data?.threadId,
+    response?.data?._id,
+    response?.data?.id,
+    response?.threadId,
+    response?._id,
+    response?.id
+  );
 }
 
 function toNumber(value: any) {
@@ -560,8 +586,10 @@ function ApplicationTimeline({
 
 function StartConversationCard({
   onMailToBrand,
+  isOpeningThread = false,
 }: {
-  onMailToBrand: () => void;
+  onMailToBrand: () => void | Promise<void>;
+  isOpeningThread?: boolean;
 }) {
   return (
     <section
@@ -590,13 +618,14 @@ function StartConversationCard({
         variant="raised"
         size="sm"
         onClick={onMailToBrand}
-        className="my-0 h-[2.75rem] flex-shrink-0 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-[1rem] shadow-none"
+        disabled={isOpeningThread}
+        className="my-0 h-[2.75rem] flex-shrink-0 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-[1rem] shadow-none disabled:cursor-not-allowed disabled:opacity-60"
         leftIcon={
           <PaperPlaneTilt weight="bold" className="h-5 w-5 text-[#1A1A1A]" />
         }
       >
         <span className="text-[1rem] font-medium leading-[1.5rem] text-[#1A1A1A]">
-          Mail to Brand
+          {isOpeningThread ? "Opening..." : "Mail to Brand"}
         </span>
       </Button>
     </section>
@@ -610,13 +639,15 @@ function CampaignHeader({
   ratingText,
   statusText,
   onConnectBrand,
+  isOpeningThread = false,
 }: {
   logoUrl: string;
   title: string;
   productUrl: string;
   ratingText: string;
   statusText: string;
-  onConnectBrand: () => void;
+  onConnectBrand: () => void | Promise<void>;
+  isOpeningThread?: boolean;
 }) {
   const headerInitials = getInitials(title);
 
@@ -677,7 +708,8 @@ function CampaignHeader({
             variant="raised"
             size="sm"
             onClick={onConnectBrand}
-            className="my-0 h-10 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-3 shadow-none"
+            disabled={isOpeningThread}
+            className="my-0 h-10 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-3 shadow-none disabled:cursor-not-allowed disabled:opacity-60"
             leftIcon={
               <EnvelopeOpen
                 weight="bold"
@@ -686,7 +718,7 @@ function CampaignHeader({
             }
           >
             <span className="text-[0.875rem] font-medium leading-[1.25rem] text-[#1A1A1A]">
-              Connect With Brand
+              {isOpeningThread ? "Opening..." : "Connect With Brand"}
             </span>
           </Button>
         </div>
@@ -698,7 +730,8 @@ function CampaignHeader({
           variant="raised"
           size="sm"
           onClick={onConnectBrand}
-          className="my-0 h-10 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-3 shadow-none"
+          disabled={isOpeningThread}
+          className="my-0 h-10 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-3 shadow-none disabled:cursor-not-allowed disabled:opacity-60"
           leftIcon={
             <ChalkboardTeacher
               weight="bold"
@@ -707,7 +740,7 @@ function CampaignHeader({
           }
         >
           <span className="text-[0.875rem] font-medium leading-[1.25rem] text-[#1A1A1A]">
-            Connect With Brand
+            {isOpeningThread ? "Opening..." : "Connect With Brand"}
           </span>
         </Button>
 
@@ -1012,7 +1045,7 @@ export default function SidebarCampaign({
 
   const [influencerId, setInfluencerId] = useState("");
   const [token, setToken] = useState("");
-
+  const [isOpeningThread, setIsOpeningThread] = useState(false);
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const [activeSlide, setActiveSlide] = useState(0);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
@@ -1734,13 +1767,83 @@ export default function SidebarCampaign({
     window.open(pdfUrl, "_blank", "noopener,noreferrer");
   };
 
-  const onMailToBrand = () => {
-    if (!brandEmail) return;
-
-    window.location.href = `mailto:${brandEmail}?subject=${encodeURIComponent(
-      campaignTitle
-    )}`;
+  const notifyAction = (message: string) => {
+    setErr(message);
   };
+
+  const onMailToBrand = async () => {
+    if (isOpeningThread) return;
+
+    const brandId = pickString(
+      brand?.brandId,
+      brand?._id,
+      brand?.id,
+      campaign?.brandId,
+      campaign?.brand?._id,
+      campaign?.brand?.brandId,
+      root?.brandId,
+      root?.brand?._id,
+      brandIdValue
+    );
+
+    const currentInfluencerId = pickString(
+      influencer?.influencerId,
+      influencer?._id,
+      influencer?.id,
+      root?.influencerId,
+      root?.influencer?._id,
+      influencerIdValue,
+      influencerId
+    );
+
+    const currentCampaignId = pickString(
+      campaign?.campaignId,
+      campaign?._id,
+      campaign?.id,
+      root?.campaignId,
+      root?._id,
+      campaignIdValue,
+      campaignId
+    );
+
+    if (!brandId || !currentInfluencerId || !currentCampaignId) {
+      notifyAction(
+        "Unable to open inbox. Missing brand, influencer, or campaign details."
+      );
+      return;
+    }
+
+    setIsOpeningThread(true);
+
+    try {
+      const response = await api.post("/emails/threads", {
+        brandId,
+        influencerId: currentInfluencerId,
+        campaignId: currentCampaignId,
+        subject: pickString(campaign?.title, campaignTitle, "Campaign"),
+        type: "campaign",
+        source: "influencer_sidebar_campaign",
+      });
+
+      const threadId = getThreadIdFromResponse(response);
+
+      if (!threadId) {
+        throw new Error("Thread created, but threadId was not returned.");
+      }
+
+      router.push(`/influencer/inbox/${threadId}`);
+    } catch (error: any) {
+      notifyAction(
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to open brand conversation."
+      );
+    } finally {
+      setIsOpeningThread(false);
+    }
+  };
+
   const handleApplyNow = () => {
     const now = new Date().toISOString();
 
@@ -1758,6 +1861,7 @@ export default function SidebarCampaign({
         ratingText={ratingText}
         statusText={statusText}
         onConnectBrand={onMailToBrand}
+        isOpeningThread={isOpeningThread}
       />
 
       <OverviewCompanyTabs activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -1768,7 +1872,10 @@ export default function SidebarCampaign({
         <>
           <ApplicationTimeline items={applicationTimelineItems} />
 
-          <StartConversationCard onMailToBrand={onMailToBrand} />
+          <StartConversationCard
+            onMailToBrand={onMailToBrand}
+            isOpeningThread={isOpeningThread}
+          />
 
           <section className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-5">
             <TagCard title="Category" values={categoryTags} />
