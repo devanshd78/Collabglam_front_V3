@@ -369,7 +369,7 @@ function getManageInfluencerHref(campaignId: string, campaignTitle?: string) {
     params.set("campaignTitle", campaignTitle);
   }
 
-  return `/brand/Influencer/all?${params.toString()}`;
+  return `/brand/influencer/all?${params.toString()}`;
 }
 
 function isCardInnerInteractive(target: EventTarget | null) {
@@ -1009,8 +1009,8 @@ export default function CampaignListPage({
       if (typeof window === "undefined") return;
 
       const href = fullyManaged
-        ? `/brand/influ/active?campaignId=${encodeURIComponent(campaignId)}&fm=1`
-        : `/brand/influ/active?campaignId=${encodeURIComponent(campaignId)}`;
+        ? `/brand/influencer/active?campaignId=${encodeURIComponent(campaignId)}&fm=1`
+        : `/brand/influencer/active?campaignId=${encodeURIComponent(campaignId)}`;
 
       window.location.href = href;
     };
@@ -1020,8 +1020,8 @@ export default function CampaignListPage({
       if (typeof window === "undefined") return;
 
       const href = fullyManaged
-        ? `/brand/influ/active?campaignId=${encodeURIComponent(campaignId)}&fm=1`
-        : `/brand/influ/applied?campaignId=${encodeURIComponent(campaignId)}`;
+        ? `/brand/influencer/active?campaignId=${encodeURIComponent(campaignId)}&fm=1`
+        : `/brand/influencer/applied?campaignId=${encodeURIComponent(campaignId)}`;
 
       window.location.href = href;
     };
@@ -1029,7 +1029,7 @@ export default function CampaignListPage({
     const handleView = () => {
       if (locked) return;
       if (typeof window !== "undefined") {
-        window.location.href = getManageInfluencerHref(campaignId,campaignTitle);
+        window.location.href = getManageInfluencerHref(campaignId, campaignTitle);
       }
     };
 
@@ -1204,7 +1204,7 @@ export default function CampaignListPage({
       const handleView = () => {
         if (locked) return;
         if (typeof window !== "undefined") {
-          window.location.href = getManageInfluencerHref(campaignId,campaignTitle);
+          window.location.href = getManageInfluencerHref(campaignId, campaignTitle);
         }
       };
 

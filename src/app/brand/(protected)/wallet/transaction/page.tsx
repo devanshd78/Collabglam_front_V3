@@ -5,7 +5,7 @@ import {
   apiGetBrandWallet,
   apiGetWalletTopupHistory,
 } from "../../../services/brandApi";
-import { post } from "@/lib/api";
+import api, { post } from "@/lib/api";
 import { toast, ToastStyles } from "@/components/ui/toast";
 
 type FilterTab = "all" | "today" | "week" | "month" | "failed";
@@ -13,8 +13,12 @@ type FilterTab = "all" | "today" | "week" | "month" | "failed";
 type BrandWallet = {
   brandId: string;
   walletBalance: number;
+  escrowBalance: number;
   frozenBalance: number;
   usableBalance: number;
+  topups?: WalletTopup[];
+  escrowHistories?: WalletEscrowHistory[];
+  withdrawHistories?: WalletWithdrawHistory[];
   freezes?: unknown[];
 };
 
@@ -37,6 +41,57 @@ type WalletTopup = {
   note?: string;
   addedByAdminId?: string | null;
   addedByAdminEmail?: string | null;
+};
+
+type WalletEscrowHistory = {
+  type?: string;
+  amount?: number;
+  currency?: string;
+  status?: string;
+  campaignId?: string;
+  influencerId?: string;
+  contractId?: string;
+  milestoneId?: string;
+  milestoneHistoryId?: string;
+  milestoneTitle?: string;
+  walletBalanceBefore?: number;
+  walletBalanceAfter?: number;
+  escrowBalanceBefore?: number;
+  escrowBalanceAfter?: number;
+  createdAt?: string;
+  note?: string;
+};
+
+type WalletWithdrawHistory = {
+  amount?: number;
+  currency?: string;
+  status?: string;
+  method?: string;
+  transactionId?: string | null;
+  walletBalanceBefore?: number;
+  walletBalanceAfter?: number;
+  createdAt?: string;
+  note?: string;
+};
+
+type WalletHistoryApiItem = {
+  type?: string;
+  amount?: number;
+  currency?: string;
+  status?: string;
+  createdAt?: string;
+  raw?: WalletTopup | WalletEscrowHistory | WalletWithdrawHistory | any;
+  campaignId?: string;
+  influencerId?: string;
+  milestoneId?: string;
+  milestoneHistoryId?: string;
+};
+
+type WalletHistoryData = {
+  topups?: WalletTopup[];
+  escrowHistories?: WalletEscrowHistory[];
+  withdrawHistories?: WalletWithdrawHistory[];
+  transactions?: WalletHistoryApiItem[];
 };
 
 type PaymentHistoryItem = {
@@ -86,11 +141,14 @@ type TransactionItem = {
   createdAt: string;
   paidAt?: string | null;
   stripeSessionId?: string;
-  campaignId?: string;
   orderId?: string;
   paymentId?: string;
   invoiceNumber?: string;
   receipt?: string;
+  campaignId?: string;
+  influencerId?: string;
+  milestoneId?: string;
+  milestoneHistoryId?: string;
 };
 
 const filterTabs: { key: FilterTab; label: string }[] = [
@@ -188,7 +246,7 @@ function getBrandIdFromLocalStorage() {
   return "";
 }
 
-function isBrandWallet(value: unknown): value is BrandWallet {
+function isBrandWallet(value: unknown): value is Partial<BrandWallet> {
   if (!value || typeof value !== "object") return false;
 
   const wallet = value as Partial<BrandWallet>;
@@ -196,20 +254,43 @@ function isBrandWallet(value: unknown): value is BrandWallet {
   return (
     typeof wallet.brandId === "string" &&
     typeof wallet.walletBalance === "number" &&
-    typeof wallet.frozenBalance === "number" &&
-    typeof wallet.usableBalance === "number"
+    (typeof wallet.escrowBalance === "number" ||
+      typeof wallet.frozenBalance === "number")
   );
 }
 
+function normalizeWalletObject(value: Partial<BrandWallet>): BrandWallet {
+  const escrowBalance = Number(value.escrowBalance ?? value.frozenBalance ?? 0);
+  const walletBalance = Number(value.walletBalance ?? 0);
+
+  return {
+    brandId: String(value.brandId || ""),
+    walletBalance,
+    escrowBalance,
+    frozenBalance: Number(value.frozenBalance ?? escrowBalance),
+    usableBalance: Number(value.usableBalance ?? walletBalance),
+    topups: Array.isArray(value.topups) ? value.topups : [],
+    escrowHistories: Array.isArray(value.escrowHistories)
+      ? value.escrowHistories
+      : [],
+    withdrawHistories: Array.isArray(value.withdrawHistories)
+      ? value.withdrawHistories
+      : [],
+    freezes: Array.isArray(value.freezes) ? value.freezes : [],
+  };
+}
+
 function normalizeWalletResponse(response: unknown): BrandWallet | null {
-  if (isBrandWallet(response)) return response;
+  if (isBrandWallet(response)) return normalizeWalletObject(response);
 
   if (response && typeof response === "object") {
     const res = response as {
       data?: BrandWallet | BrandWalletResponse;
+      result?: BrandWallet;
     };
 
-    if (isBrandWallet(res.data)) return res.data;
+    if (isBrandWallet(res.data)) return normalizeWalletObject(res.data);
+    if (isBrandWallet(res.result)) return normalizeWalletObject(res.result);
 
     if (
       res.data &&
@@ -217,14 +298,14 @@ function normalizeWalletResponse(response: unknown): BrandWallet | null {
       "data" in res.data &&
       isBrandWallet((res.data as BrandWalletResponse).data)
     ) {
-      return (res.data as BrandWalletResponse).data;
+      return normalizeWalletObject((res.data as BrandWalletResponse).data);
     }
 
     if (
       "data" in response &&
       isBrandWallet((response as BrandWalletResponse).data)
     ) {
-      return (response as BrandWalletResponse).data;
+      return normalizeWalletObject((response as BrandWalletResponse).data);
     }
   }
 
@@ -280,6 +361,50 @@ function normalizeTopupHistoryResponse(response: unknown): WalletTopup[] {
 
   return [];
 }
+
+function normalizeWalletHistoryResponse(response: unknown): WalletHistoryData {
+  const empty: WalletHistoryData = {
+    topups: [],
+    escrowHistories: [],
+    withdrawHistories: [],
+    transactions: [],
+  };
+
+  const unwrap = (value: unknown): any => {
+    if (!value || typeof value !== "object") return value;
+
+    const obj = value as { data?: unknown; result?: unknown };
+
+    if (obj.data && typeof obj.data === "object") {
+      const first = obj.data as { data?: unknown; result?: unknown };
+      if (first.data && typeof first.data === "object") return first.data;
+      if (first.result && typeof first.result === "object") return first.result;
+      return obj.data;
+    }
+
+    if (obj.result && typeof obj.result === "object") return obj.result;
+
+    return value;
+  };
+
+  const data = unwrap(response);
+
+  if (!data || typeof data !== "object") return empty;
+
+  const obj = data as WalletHistoryData;
+
+  return {
+    topups: Array.isArray(obj.topups) ? obj.topups : [],
+    escrowHistories: Array.isArray(obj.escrowHistories)
+      ? obj.escrowHistories
+      : [],
+    withdrawHistories: Array.isArray(obj.withdrawHistories)
+      ? obj.withdrawHistories
+      : [],
+    transactions: Array.isArray(obj.transactions) ? obj.transactions : [],
+  };
+}
+
 
 function normalizePaymentHistoryResponse(response: unknown): PaymentHistoryItem[] {
   const findPaymentHistory = (value: unknown): PaymentHistoryItem[] => {
@@ -384,6 +509,47 @@ function getPaymentHistoryAmount(payment: PaymentHistoryItem) {
   return cents / 100;
 }
 
+function getWalletHistoryTitle(type?: string, raw?: any) {
+  const value = String(type || "").toLowerCase();
+
+  if (value === "topup") return "Wallet Topup";
+  if (value === "withdraw") return "Wallet Withdrawal";
+  if (value.includes("refund")) return "Escrow Refund";
+  if (value.includes("release")) return "Escrow Released";
+  if (value.includes("manual")) return "Manual Escrow";
+  if (value.includes("milestone")) {
+    return raw?.milestoneTitle
+      ? `Moved to Escrow - ${raw.milestoneTitle}`
+      : "Moved to Escrow";
+  }
+
+  return "Wallet Transaction";
+}
+
+function getWalletHistoryPrefix(type?: string): "+" | "-" {
+  const value = String(type || "").toLowerCase();
+
+  if (value === "topup" || value.includes("refund")) return "+";
+
+  return "-";
+}
+
+function getWalletHistoryId(item: WalletHistoryApiItem) {
+  const raw: any = item.raw || {};
+
+  return (
+    raw.stripePaymentIntentId ||
+    raw.paymentIntentId ||
+    raw.stripeSessionId ||
+    raw.transactionId ||
+    item.milestoneHistoryId ||
+    raw.milestoneHistoryId ||
+    item.milestoneId ||
+    raw.milestoneId ||
+    "-"
+  );
+}
+
 function normalizeWalletTopupToTransaction(
   transaction: WalletTopup
 ): TransactionItem {
@@ -423,6 +589,32 @@ function normalizePaymentToTransaction(
     paymentId: payment.paymentId,
     invoiceNumber: payment.invoiceNumber,
     receipt: payment.receipt,
+  };
+}
+
+function normalizeWalletHistoryToTransaction(
+  item: WalletHistoryApiItem
+): TransactionItem {
+  const raw: any = item.raw || {};
+  const type = String(item.type || raw.type || "").toLowerCase();
+  const amount = Math.abs(Number(item.amount ?? raw.amount ?? 0));
+  const prefix = getWalletHistoryPrefix(type);
+
+  return {
+    id: String(getWalletHistoryId(item)),
+    title: getWalletHistoryTitle(type, raw),
+    amount,
+    amountPrefix: prefix,
+    currency: item.currency || raw.currency || "usd",
+    status: item.status || raw.status || "success",
+    source: type || raw.source || "wallet",
+    createdAt: item.createdAt || raw.createdAt || "",
+    stripeSessionId: raw.stripeSessionId,
+    campaignId: item.campaignId || raw.campaignId,
+    influencerId: item.influencerId || raw.influencerId,
+    milestoneId: item.milestoneId || raw.milestoneId,
+    milestoneHistoryId: item.milestoneHistoryId || raw.milestoneHistoryId,
+    paymentId: raw.stripePaymentIntentId || raw.paymentIntentId || raw.transactionId,
   };
 }
 
@@ -518,16 +710,21 @@ export default function TransactionHistoryPage() {
         return;
       }
 
-      const [walletResponse, topupHistoryResponse, paymentHistoryResponse] =
-        await Promise.allSettled([
-          apiGetBrandWallet({ brandId }),
-          apiGetWalletTopupHistory({ brandId }),
-          post<PaymentHistoryResponse>("/payment/history", {
-            userId: brandId,
-            role: "Brand",
-            status: "all",
-          }),
-        ]);
+      const [
+        walletResponse,
+        walletHistoryResponse,
+        topupHistoryResponse,
+        paymentHistoryResponse,
+      ] = await Promise.allSettled([
+        apiGetBrandWallet({ brandId }),
+        api.get("/brand-wallet/history", { params: { brandId } }),
+        apiGetWalletTopupHistory({ brandId }),
+        post<PaymentHistoryResponse>("/payment/history", {
+          userId: brandId,
+          role: "Brand",
+          status: "all",
+        }),
+      ]);
 
       if (walletResponse.status === "fulfilled") {
         setWallet(normalizeWalletResponse(walletResponse.value));
@@ -537,7 +734,60 @@ export default function TransactionHistoryPage() {
 
       const combinedTransactions: TransactionItem[] = [];
 
-      if (topupHistoryResponse.status === "fulfilled") {
+      let walletHistoryUsed = false;
+
+      if (walletHistoryResponse.status === "fulfilled") {
+        const walletHistory = normalizeWalletHistoryResponse(
+          walletHistoryResponse.value
+        );
+
+        if (walletHistory.transactions?.length) {
+          combinedTransactions.push(
+            ...walletHistory.transactions.map(normalizeWalletHistoryToTransaction)
+          );
+          walletHistoryUsed = true;
+        } else {
+          const fallbackWalletTransactions: WalletHistoryApiItem[] = [
+            ...(walletHistory.topups || []).map((item) => ({
+              type: "topup",
+              amount: item.amount,
+              currency: item.currency,
+              status: item.status,
+              createdAt: item.createdAt,
+              raw: item,
+            })),
+            ...(walletHistory.escrowHistories || []).map((item) => ({
+              type: item.type || "escrow",
+              amount: item.amount,
+              currency: item.currency,
+              status: item.status || "success",
+              createdAt: item.createdAt,
+              raw: item,
+              campaignId: item.campaignId,
+              influencerId: item.influencerId,
+              milestoneId: item.milestoneId,
+              milestoneHistoryId: item.milestoneHistoryId,
+            })),
+            ...(walletHistory.withdrawHistories || []).map((item) => ({
+              type: "withdraw",
+              amount: item.amount,
+              currency: item.currency,
+              status: item.status,
+              createdAt: item.createdAt,
+              raw: item,
+            })),
+          ];
+
+          if (fallbackWalletTransactions.length) {
+            combinedTransactions.push(
+              ...fallbackWalletTransactions.map(normalizeWalletHistoryToTransaction)
+            );
+            walletHistoryUsed = true;
+          }
+        }
+      }
+
+      if (!walletHistoryUsed && topupHistoryResponse.status === "fulfilled") {
         const topupHistory = normalizeTopupHistoryResponse(
           topupHistoryResponse.value
         );
@@ -571,6 +821,7 @@ export default function TransactionHistoryPage() {
       }
 
       if (
+        walletHistoryResponse.status === "rejected" &&
         topupHistoryResponse.status === "rejected" &&
         paymentHistoryResponse.status === "rejected"
       ) {

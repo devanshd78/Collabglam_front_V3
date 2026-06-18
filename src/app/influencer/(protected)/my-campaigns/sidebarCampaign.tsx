@@ -20,6 +20,8 @@ import {
   PaperPlaneTilt,
   Wallet,
   EnvelopeOpen,
+  CloudArrowUp,
+  CircleNotch,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/buttonComp";
 import Image from "next/image";
@@ -28,6 +30,9 @@ import SkeletonLoader, {
   SkeletonCircle,
   SkeletonProvider,
 } from "@/components/common/SkeletonLoader";
+import api from "@/lib/api";
+import InfluencerContractModal from "./InfluencerContractModal";
+import useInfluencerSidebarWidth from "./useSidebarWidth";
 
 function asArray<T = any>(v: any): T[] {
   if (!v) return [];
@@ -91,6 +96,31 @@ function firstNonEmpty(...values: any[]) {
   }
 
   return "";
+}
+
+function pickString(...values: any[]) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+
+    const text = String(value).trim();
+    if (text) return text;
+  }
+
+  return "";
+}
+
+function getThreadIdFromResponse(response: any) {
+  return pickString(
+    response?.data?.data?.threadId,
+    response?.data?.data?._id,
+    response?.data?.data?.id,
+    response?.data?.threadId,
+    response?.data?._id,
+    response?.data?.id,
+    response?.threadId,
+    response?._id,
+    response?.id
+  );
 }
 
 function toNumber(value: any) {
@@ -560,8 +590,10 @@ function ApplicationTimeline({
 
 function StartConversationCard({
   onMailToBrand,
+  isOpeningThread = false,
 }: {
-  onMailToBrand: () => void;
+  onMailToBrand: () => void | Promise<void>;
+  isOpeningThread?: boolean;
 }) {
   return (
     <section
@@ -590,13 +622,14 @@ function StartConversationCard({
         variant="raised"
         size="sm"
         onClick={onMailToBrand}
-        className="my-0 h-[2.75rem] flex-shrink-0 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-[1rem] shadow-none"
+        disabled={isOpeningThread}
+        className="my-0 h-[2.75rem] flex-shrink-0 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-[1rem] shadow-none disabled:cursor-not-allowed disabled:opacity-60"
         leftIcon={
           <PaperPlaneTilt weight="bold" className="h-5 w-5 text-[#1A1A1A]" />
         }
       >
         <span className="text-[1rem] font-medium leading-[1.5rem] text-[#1A1A1A]">
-          Mail to Brand
+          {isOpeningThread ? "Opening..." : "Mail to Brand"}
         </span>
       </Button>
     </section>
@@ -610,13 +643,15 @@ function CampaignHeader({
   ratingText,
   statusText,
   onConnectBrand,
+  isOpeningThread = false,
 }: {
   logoUrl: string;
   title: string;
   productUrl: string;
   ratingText: string;
   statusText: string;
-  onConnectBrand: () => void;
+  onConnectBrand: () => void | Promise<void>;
+  isOpeningThread?: boolean;
 }) {
   const headerInitials = getInitials(title);
 
@@ -677,7 +712,8 @@ function CampaignHeader({
             variant="raised"
             size="sm"
             onClick={onConnectBrand}
-            className="my-0 h-10 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-3 shadow-none"
+            disabled={isOpeningThread}
+            className="my-0 h-10 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-3 shadow-none disabled:cursor-not-allowed disabled:opacity-60"
             leftIcon={
               <EnvelopeOpen
                 weight="bold"
@@ -686,7 +722,7 @@ function CampaignHeader({
             }
           >
             <span className="text-[0.875rem] font-medium leading-[1.25rem] text-[#1A1A1A]">
-              Connect With Brand
+              {isOpeningThread ? "Opening..." : "Connect With Brand"}
             </span>
           </Button>
         </div>
@@ -698,7 +734,8 @@ function CampaignHeader({
           variant="raised"
           size="sm"
           onClick={onConnectBrand}
-          className="my-0 h-10 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-3 shadow-none"
+          disabled={isOpeningThread}
+          className="my-0 h-10 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-3 shadow-none disabled:cursor-not-allowed disabled:opacity-60"
           leftIcon={
             <ChalkboardTeacher
               weight="bold"
@@ -707,13 +744,441 @@ function CampaignHeader({
           }
         >
           <span className="text-[0.875rem] font-medium leading-[1.25rem] text-[#1A1A1A]">
-            Connect With Brand
+            {isOpeningThread ? "Opening..." : "Connect With Brand"}
           </span>
         </Button>
 
         {statusText ? <CampaignStatusBadge status={statusText} /> : null}
       </div>
     </section>
+  );
+}
+
+const OWN_CONTRACT_MAX_BYTES = 10 * 1024 * 1024;
+
+function formatContractFileSize(size?: number | string) {
+  const n = Number(size || 0);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function CreatorOwnContractReuploadDialog({
+  open,
+  originalFileName,
+  originalFileSize,
+  file,
+  accepted,
+  error,
+  isSubmitting,
+  isDownloading,
+  onClose,
+  onDownloadOriginal,
+  onFileSelected,
+  onClearFile,
+  onAcceptedChange,
+  onSubmit,
+}: {
+  open: boolean;
+  originalFileName: string;
+  originalFileSize?: string;
+  file: File | null;
+  accepted: boolean;
+  error?: string;
+  isSubmitting?: boolean;
+  isDownloading?: boolean;
+  onClose: () => void;
+  onDownloadOriginal: () => void;
+  onFileSelected: (file: File | null) => void;
+  onClearFile: () => void;
+  onAcceptedChange: (value: boolean) => void;
+  onSubmit: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setIsDragging(false);
+      setShowTerms(false);
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
+  const dialogDate = useMemo(() => {
+    if (!open) return "";
+
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    })
+      .format(new Date())
+      .replace(",", "");
+  }, [open]);
+
+  const handleFile = (nextFile: File | null) => {
+    if (!nextFile) {
+      onFileSelected(null);
+      return;
+    }
+
+    onFileSelected(nextFile);
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(false);
+
+    if (isSubmitting) return;
+    handleFile(event.dataTransfer.files?.[0] || null);
+  };
+
+  const hasReadyFile = Boolean(file);
+  const canSend = Boolean(file && accepted && !isSubmitting);
+
+  if (!mounted || !open) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[2147483647] flex min-h-screen items-center justify-center bg-black/40 px-4 py-8"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Upload signed contract"
+      onClick={() => {
+        if (!isSubmitting) onClose();
+      }}
+    >
+      <div
+        className="flex max-h-[90vh] w-full max-w-[52rem] flex-col overflow-hidden bg-white"
+        style={{
+          borderRadius: "1rem",
+          boxShadow:
+            "0 24px 40px -4px rgba(0,0,0,0.10), 0 0 12px rgba(0,0,0,0.08)",
+          fontFamily: "var(--Font-Family-Inter, Inter)",
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="px-8 pt-8">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <h2 className="truncate text-[1.25rem] font-semibold leading-[1.75rem] text-[#1A1A1A]">
+                Upload Contract
+              </h2>
+              <p className="mt-1 text-[0.875rem] leading-[1.25rem] text-[#969696]">
+                Download the brand contract, fill/sign it, then upload the updated PDF.
+              </p>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-3">
+              <span className="text-[1rem] font-medium leading-[1.5rem] text-[#B8B8B8]">
+                {dialogDate}
+              </span>
+
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={onClose}
+                aria-label="Close upload contract dialog"
+                className="flex h-6 w-6 items-center justify-center rounded-full text-xl leading-none text-[#1A1A1A] hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 h-px w-full bg-[#E5E5E5]" />
+        </div>
+
+        {!showTerms ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 pb-5 pt-6">
+            <div className="mb-5 flex w-full items-center justify-between gap-4 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-3 py-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <FilePdf weight="fill" className="h-9 w-9 shrink-0 text-[#E35141]" />
+
+                <div className="min-w-0">
+                  <div className="truncate text-[1rem] font-medium leading-[1.5rem] text-[#1A1A1A]">
+                    {originalFileName || "Contract.pdf"}
+                  </div>
+                  <div className="text-[0.875rem] leading-[1.25rem] text-[#969696]">
+                    {originalFileSize || "Brand uploaded contract"}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={isDownloading || isSubmitting}
+                onClick={onDownloadOriginal}
+                className="flex h-10 items-center justify-center gap-2 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-4 text-[0.875rem] font-semibold text-[#1A1A1A] shadow-[0_2px_4px_-2px_rgba(0,0,0,0.08),0_4px_8px_-2px_rgba(0,0,0,0.04)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <DownloadSimple weight="bold" className="h-4 w-4" />
+                {isDownloading ? "Downloading..." : "Download"}
+              </button>
+            </div>
+
+            <div
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!isSubmitting) setIsDragging(true);
+              }}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setIsDragging(false);
+              }}
+              onDrop={handleDrop}
+              onClick={() => {
+                if (!isSubmitting) inputRef.current?.click();
+              }}
+              className={[
+                "flex min-h-[13.5rem] cursor-pointer flex-col items-center justify-center px-8 py-10 text-center transition",
+                isDragging ? "border-[#1A1A1A]" : "hover:border-[#BDBDBD]",
+                isSubmitting ? "pointer-events-none opacity-70" : "",
+              ].join(" ")}
+              style={{
+                borderRadius: "0.75rem",
+                border: "1px solid var(--Neutrals-300, #D6D6D6)",
+                background: "var(--Neutrals-50, #F9F9F9)",
+              }}
+            >
+              <input
+                ref={inputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                disabled={isSubmitting}
+                onChange={(event) => {
+                  handleFile(event.target.files?.[0] || null);
+                  event.target.value = "";
+                }}
+              />
+
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E6E6E6]">
+                <CloudArrowUp size={16} weight="bold" color="#969696" />
+              </div>
+
+              {file ? (
+                <>
+                  <div className="mt-3 max-w-[21rem] truncate text-[0.875rem] font-semibold leading-5 text-[#1A1A1A]">
+                    {file.name}
+                  </div>
+                  <div className="mt-1 text-[0.75rem] leading-4 text-[#969696]">
+                    {formatContractFileSize(file.size)}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onClearFile();
+                    }}
+                    className="mt-3 text-[0.75rem] font-semibold text-[#1A1A1A] underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Remove file
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="mt-3 text-[0.875rem] leading-5 text-[#B8B8B8]">
+                    <span className="font-semibold text-[#1A1A1A] underline underline-offset-2">
+                      Click to upload
+                    </span>{" "}
+                    or drag and drop
+                  </div>
+                  <div className="mt-1 text-[0.75rem] leading-4 text-[#B8B8B8]">
+                    Signed/filled PDF under {Math.round(OWN_CONTRACT_MAX_BYTES / (1024 * 1024))}mb
+                  </div>
+                </>
+              )}
+            </div>
+
+            {error ? (
+              <div className="mt-3 rounded-[0.5rem] border border-red-200 bg-red-50 px-3 py-2 text-[0.875rem] leading-5 text-red-700">
+                {error}
+              </div>
+            ) : null}
+
+            <label className="mt-4 flex cursor-pointer items-start gap-2">
+              <input
+                type="checkbox"
+                checked={accepted}
+                disabled={!hasReadyFile || isSubmitting}
+                onChange={(event) => onAcceptedChange(event.target.checked)}
+                className="mt-1 h-5 w-5 shrink-0 rounded border-[#B3B3B3] disabled:cursor-not-allowed disabled:opacity-40"
+              />
+
+              <span className="text-[0.875rem] font-normal leading-[1.25rem] text-[#B8B8B8]">
+                By signing, I confirm that I have read and therefore agree to all{" "}
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setShowTerms(true);
+                  }}
+                  className="text-[1rem] font-medium leading-[1.5rem] text-[#969696] underline"
+                >
+                  contractual terms
+                </button>
+                , which become legally binding.
+              </span>
+            </label>
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col px-8 pb-5 pt-5">
+            <div className="min-h-[17.25rem] max-h-[17.25rem] overflow-y-auto pr-4">
+              <p className="text-[1rem] font-medium leading-[1.5rem] text-[#969696]">
+                By accepting this acknowledgement, the Brand and Creator confirm that the uploaded contract is the controlling contract document for this collaboration.
+              </p>
+
+              <ol className="mt-5 list-decimal space-y-4 pl-5 text-[1rem] font-medium leading-[1.5rem] text-[#969696]">
+                <li>The Creator has downloaded and reviewed the Brand uploaded contract.</li>
+                <li>The Creator is uploading the filled/signed updated PDF as the final contract document.</li>
+                <li>The uploaded signed PDF will become legally binding once submitted.</li>
+                <li>CollabGlam may keep an acknowledgement record and contract activity history.</li>
+              </ol>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-auto border-t border-[#F1F1F1] bg-white px-8 py-5">
+          <div className="flex items-center justify-between gap-5">
+            {showTerms ? (
+              <button
+                type="button"
+                onClick={() => setShowTerms(false)}
+                className="h-10 rounded-[0.5rem] border border-[#D6D6D6] bg-white px-4 text-[0.875rem] font-semibold text-[#1A1A1A] hover:bg-[#F9F9F9]"
+              >
+                Back to upload
+              </button>
+            ) : (
+              <div />
+            )}
+
+            <div className="flex items-center justify-end gap-5">
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={onClose}
+                className="h-10 rounded-[0.5rem] px-3 text-[0.875rem] font-semibold text-[#1A1A1A] hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                disabled={!canSend}
+                onClick={onSubmit}
+                className="flex h-10 min-w-[5.75rem] items-center justify-center rounded-[0.5rem] bg-[#1A1A1A] px-5 text-[0.875rem] font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <>
+                    <CircleNotch size={14} weight="bold" className="mr-2 animate-spin" />
+                    Uploading
+                  </>
+                ) : (
+                  "Submit"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function CreatorContractFloatingBar({
+  fileName,
+  fileSize,
+  showDownload,
+  disabled,
+  isDownloading,
+  onReject,
+  onAccept,
+  onDownload,
+}: {
+  fileName: string;
+  fileSize?: string;
+  showDownload?: boolean;
+  disabled?: boolean;
+  isDownloading?: boolean;
+  onReject: () => void;
+  onAccept: () => void;
+  onDownload?: () => void;
+}) {
+  return (
+    <div className="flex w-full items-center justify-between gap-4 rounded-[0.75rem] border border-[#E6E6E6] bg-white px-3 py-4 shadow-[0_12px_32px_rgba(0,0,0,0.10)]">
+      <div className="flex min-w-0 items-center gap-3">
+        <FilePdf weight="fill" className="h-9 w-9 shrink-0 text-[#E35141]" />
+
+        <div className="min-w-0">
+          <div className="truncate text-[1rem] font-medium leading-[1.5rem] text-[#1A1A1A]">
+            {fileName}
+          </div>
+
+          {fileSize ? (
+            <div className="text-[0.875rem] leading-[1.25rem] text-[#969696]">
+              {fileSize}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-5">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onReject}
+          className="text-[0.875rem] font-medium text-[#1A1A1A] hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Reject
+        </button>
+
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onAccept}
+          className="h-10 rounded-[0.75rem] bg-[#1A1A1A] px-7 text-[0.875rem] font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Accept
+        </button>
+
+        {showDownload ? (
+          <button
+            type="button"
+            disabled={disabled || isDownloading}
+            onClick={onDownload}
+            className="flex h-10 w-10 items-center justify-center rounded-[0.75rem] text-[#1A1A1A] hover:bg-[#F9F9F9] disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Download contract"
+          >
+            <DownloadSimple weight="bold" className="h-5 w-5" />
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -968,6 +1433,7 @@ function ImagePreviewModal({
 
 export default function SidebarCampaign({
   campaignId: campaignIdProp,
+  contractId: contractIdProp,
   invitationId,
   invitationStatus,
   invitationBrandLogo,
@@ -976,6 +1442,7 @@ export default function SidebarCampaign({
   embedded = false,
 }: {
   campaignId?: string;
+  contractId?: string;
   invitationId?: string;
   invitationStatus?: string;
   invitationBrandLogo?: string;
@@ -984,6 +1451,7 @@ export default function SidebarCampaign({
   embedded?: boolean;
 }) {
   const router = useRouter();
+  const influencerSidebarOffset = useInfluencerSidebarWidth();
 
   const params = useParams();
   const searchParams = useSearchParams();
@@ -1012,10 +1480,20 @@ export default function SidebarCampaign({
 
   const [influencerId, setInfluencerId] = useState("");
   const [token, setToken] = useState("");
-
+  const [isOpeningThread, setIsOpeningThread] = useState(false);
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const [activeSlide, setActiveSlide] = useState(0);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+
+  const [creatorOwnContractDialogOpen, setCreatorOwnContractDialogOpen] = useState(false);
+  const [creatorOwnContractAccepted, setCreatorOwnContractAccepted] = useState(false);
+  const [creatorOwnContractFile, setCreatorOwnContractFile] = useState<File | null>(null);
+  const [templateContractSidebarOpen, setTemplateContractSidebarOpen] = useState(false);
+  const [creatorContractError, setCreatorContractError] = useState("");
+  const [creatorContractStatusLocal, setCreatorContractStatusLocal] = useState("");
+  const [creatorContractMeta, setCreatorContractMeta] = useState<any | null>(null);
+  const [isCreatorContractDownloading, setIsCreatorContractDownloading] = useState(false);
+  const [isCreatorContractSubmitting, setIsCreatorContractSubmitting] = useState(false);
 
   useEffect(() => {
     setLocalInvitationStatus(invitationStatus || "");
@@ -1086,6 +1564,62 @@ export default function SidebarCampaign({
       cancelled = true;
     };
   }, [influencerId, campaignId, token]);
+
+  useEffect(() => {
+    const rootDoc = doc as any;
+    const campaignDoc =
+      rootDoc?.campaign ?? rootDoc?.campaignData ?? rootDoc?.data?.campaign ?? rootDoc;
+    const influencerDoc =
+      rootDoc?.influencer ??
+      rootDoc?.creator ??
+      rootDoc?.application?.influencer ??
+      rootDoc?.data?.influencer ??
+      {};
+
+    const currentContractId = pickString(
+      contractIdProp,
+      influencerDoc?.contractId,
+      influencerDoc?.contractMongoId,
+      influencerDoc?.contract?._id,
+      influencerDoc?.contract?.contractId,
+      campaignDoc?.contractId,
+      campaignDoc?.contractMongoId,
+      campaignDoc?.contract?._id,
+      campaignDoc?.contract?.contractId,
+      rootDoc?.contractId,
+      rootDoc?.contractMongoId,
+      rootDoc?.contract?._id,
+      rootDoc?.contract?.contractId
+    );
+
+    if (!currentContractId) {
+      setCreatorContractMeta(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    api
+      .get(`/contract/get-contract-details/${currentContractId}`)
+      .then((response: any) => {
+        if (cancelled) return;
+
+        setCreatorContractMeta(
+          response?.data?.contract ??
+            response?.data?.data?.contract ??
+            response?.data?.data ??
+            response?.data ??
+            null
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setCreatorContractMeta(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [contractIdProp, doc]);
 
   if (loading) {
     return <CampaignSidebarLoadingSkeleton embedded={embedded} />;
@@ -1208,6 +1742,401 @@ export default function SidebarCampaign({
   const influencerIdValue = normalizeMongoId(
     influencer?.influencerId ?? influencer?._id ?? influencer?.id ?? influencerId
   );
+
+  const contractMeta = creatorContractMeta || {};
+  const contractDocument =
+    contractMeta?.document ||
+    contractMeta?.contractDocument ||
+    contractMeta?.documents ||
+    contractMeta?.contract?.document ||
+    campaign?.contract?.document ||
+    root?.contract?.document ||
+    {};
+
+  const uploadedContractDocument =
+    contractDocument?.uploadedContract ||
+    contractDocument?.signedUploadedContract ||
+    contractMeta?.uploadedContract ||
+    contractMeta?.signedUploadedContract ||
+    campaign?.contract?.uploadedContract ||
+    root?.contract?.uploadedContract ||
+    {};
+
+  const creatorContractId = pickString(
+    contractIdProp,
+    contractMeta?.contractId,
+    contractMeta?._id,
+    influencer?.contractId,
+    influencer?.contractMongoId,
+    influencer?.contract?._id,
+    influencer?.contract?.contractId,
+    campaign?.contractId,
+    campaign?.contractMongoId,
+    campaign?.contract?._id,
+    campaign?.contract?.contractId,
+    campaign?.contracts?._id,
+    campaign?.contracts?.contractId,
+    root?.contractId,
+    root?.contractMongoId,
+    root?.contract?._id,
+    root?.contract?.contractId,
+    root?.contracts?._id,
+    root?.contracts?.contractId
+  );
+
+  const creatorContractStatus = String(
+    creatorContractStatusLocal ||
+    contractMeta?.status ||
+    influencer?.contractStatus ||
+    influencer?.contract?.status ||
+    campaign?.contractStatus ||
+    campaign?.contract?.status ||
+    campaign?.contracts?.status ||
+    root?.contractStatus ||
+    root?.contract?.status ||
+    root?.contracts?.status ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+
+  const creatorContractSource = String(
+    pickString(
+      contractMeta?.contractSource,
+      contractDocument?.documentSource,
+      contractMeta?.documentSource,
+      campaign?.contractSource,
+      campaign?.contract?.contractSource,
+      campaign?.contract?.documentSource,
+      root?.contractSource,
+      root?.contract?.contractSource,
+      root?.contract?.documentSource
+    )
+  ).toLowerCase();
+
+  const isUploadedOwnContract = Boolean(
+    creatorContractSource === "uploaded" ||
+    uploadedContractDocument?.key ||
+    uploadedContractDocument?.originalName
+  );
+
+  const creatorHasAcceptedContract =
+    Number(
+      contractMeta?.isAccepted ??
+      influencer?.contract?.isAccepted ??
+      campaign?.contract?.isAccepted ??
+      root?.contract?.isAccepted ??
+      0
+    ) === 1 ||
+    ["influencer_accepted", "brand_accepted", "ready_to_sign", "contract_signed", "milestones_created", "locked"].includes(
+      creatorContractStatus
+    );
+
+  const creatorHasRejectedContract =
+    Number(
+      contractMeta?.isRejected ??
+      influencer?.isRejected ??
+      influencer?.contract?.isRejected ??
+      campaign?.isRejected ??
+      campaign?.contract?.isRejected ??
+      root?.isRejected ??
+      root?.contract?.isRejected ??
+      0
+    ) === 1 ||
+    creatorContractStatus === "rejected";
+
+  const showCreatorContractBar = Boolean(
+    creatorContractId && !creatorHasAcceptedContract && !creatorHasRejectedContract
+  );
+
+  const creatorContractSentAt = firstValidDate(
+    contractMeta?.lastSentAt,
+    contractMeta?.createdAt,
+    uploadedContractDocument?.uploadedAt,
+    influencer?.contractSentAt,
+    influencer?.contractCreatedAt,
+    influencer?.contract?.lastSentAt,
+    influencer?.contract?.createdAt,
+    campaign?.contractSentAt,
+    campaign?.contractCreatedAt,
+    campaign?.contract?.lastSentAt,
+    campaign?.contract?.createdAt,
+    root?.contractSentAt,
+    root?.contractCreatedAt,
+    root?.contract?.lastSentAt,
+    root?.contract?.createdAt,
+    campaign?.updatedAt
+  );
+
+  const creatorContractFileName = pickString(
+    uploadedContractDocument?.originalName,
+    contractDocument?.fileName,
+    contractMeta?.contractFileName,
+    campaign?.contractFileName,
+    campaign?.contract?.fileName,
+    campaign?.contract?.document?.uploadedContract?.originalName,
+    campaign?.contract?.uploadedContract?.originalName,
+    root?.contractFileName,
+    root?.contract?.fileName,
+    root?.contract?.document?.uploadedContract?.originalName,
+    root?.contract?.uploadedContract?.originalName,
+    isUploadedOwnContract ? "BrandContract.pdf" : "Contract Sent By Brand"
+  );
+
+  const creatorContractFileSize = pickString(
+    contractDocument?.fileSizeText,
+    uploadedContractDocument?.sizeText,
+    uploadedContractDocument?.sizeBytes
+      ? formatContractFileSize(uploadedContractDocument.sizeBytes)
+      : "",
+    campaign?.contractFileSizeText,
+    campaign?.contract?.fileSizeText,
+    campaign?.contract?.document?.uploadedContract?.sizeText,
+    root?.contractFileSizeText,
+    root?.contract?.fileSizeText,
+    root?.contract?.document?.uploadedContract?.sizeText,
+    isUploadedOwnContract ? "Brand uploaded contract" : "Review contract details"
+  );
+
+  const downloadCreatorContract = async () => {
+    if (!creatorContractId || isCreatorContractDownloading) return;
+
+    setCreatorContractError("");
+    setIsCreatorContractDownloading(true);
+
+    try {
+      const response = await api.post(
+        "/contract/viewPdf",
+        { contractId: creatorContractId },
+        { responseType: "blob" }
+      );
+
+      const blob = new Blob([response.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = creatorContractFileName || `Contract-${creatorContractId}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      setCreatorContractError(
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to download contract."
+      );
+    } finally {
+      setIsCreatorContractDownloading(false);
+    }
+  };
+
+  const uploadOwnContractFileToStorage = async (file: File) => {
+    const uploadUrlResponse = await api.post("/contract/own/influencer/upload-url", {
+      contractId: creatorContractId,
+      brandId: brandIdValue,
+      influencerId: influencerIdValue || influencerId,
+      campaignId: campaignIdValue,
+      fileName: file.name,
+      contentType: file.type || "application/pdf",
+      sizeBytes: file.size,
+    });
+
+    const upload =
+      uploadUrlResponse?.data?.upload ??
+      uploadUrlResponse?.data?.data?.upload ??
+      uploadUrlResponse?.data ??
+      {};
+
+    const uploadUrl = pickString(
+      upload?.url,
+      upload?.uploadUrl,
+      upload?.signedUrl,
+      upload?.presignedUrl
+    );
+
+    if (!uploadUrl) {
+      throw new Error("Upload URL was not returned.");
+    }
+
+    if (upload?.fields && typeof upload.fields === "object") {
+      const formData = new FormData();
+
+      Object.entries(upload.fields).forEach(([key, value]) => {
+        formData.append(key, String(value));
+      });
+
+      formData.append("file", file);
+
+      await fetch(uploadUrl, {
+        method: "POST",
+        body: formData,
+      });
+    } else {
+      await fetch(uploadUrl, {
+        method: upload?.method || "PUT",
+        headers: {
+          "Content-Type": file.type || "application/pdf",
+        },
+        body: file,
+      });
+    }
+
+    return {
+      key: pickString(upload?.key, upload?.objectKey, upload?.s3Key),
+      bucket: pickString(upload?.bucket, upload?.Bucket),
+      folder: pickString(upload?.folder),
+      originalName: file.name,
+      mimeType: file.type || "application/pdf",
+      sizeBytes: file.size,
+    };
+  };
+
+  const submitUploadedOwnContract = async () => {
+    if (!creatorContractId || isCreatorContractSubmitting) return;
+
+    if (!creatorOwnContractFile) {
+      setCreatorContractError("Please upload the filled/signed contract PDF.");
+      return;
+    }
+
+    if (creatorOwnContractFile.type && creatorOwnContractFile.type !== "application/pdf") {
+      setCreatorContractError("Only PDF files are allowed.");
+      return;
+    }
+
+    if (creatorOwnContractFile.size > OWN_CONTRACT_MAX_BYTES) {
+      setCreatorContractError(
+        `PDF must be under ${Math.round(OWN_CONTRACT_MAX_BYTES / (1024 * 1024))}mb.`
+      );
+      return;
+    }
+
+    if (!creatorOwnContractAccepted) {
+      setCreatorContractError("Please accept the contractual terms before submitting.");
+      return;
+    }
+
+    setCreatorContractError("");
+    setIsCreatorContractSubmitting(true);
+
+    try {
+      const uploadedContract = await uploadOwnContractFileToStorage(creatorOwnContractFile);
+
+      const response = await api.post("/contract/own/influencer/send-signed", {
+        contractId: creatorContractId,
+        brandId: brandIdValue,
+        influencerId: influencerIdValue || influencerId,
+        campaignId: campaignIdValue,
+        uploadedContract,
+      });
+
+      const nextStatus =
+        response?.data?.contract?.status ||
+        response?.data?.data?.contract?.status ||
+        "contract_signed";
+
+      setCreatorContractStatusLocal(nextStatus);
+      setCreatorOwnContractDialogOpen(false);
+      setCreatorOwnContractAccepted(false);
+      setCreatorOwnContractFile(null);
+
+      setDoc((previous: any) => {
+        if (!previous) return previous;
+
+        const patch = { isAccepted: 1, isRejected: 0, contractStatus: nextStatus };
+
+        return {
+          ...previous,
+          ...patch,
+          influencer: previous.influencer
+            ? { ...previous.influencer, ...patch }
+            : previous.influencer,
+          creator: previous.creator
+            ? { ...previous.creator, ...patch }
+            : previous.creator,
+          campaign: previous.campaign
+            ? { ...previous.campaign, ...patch }
+            : previous.campaign,
+          campaignData: previous.campaignData
+            ? { ...previous.campaignData, ...patch }
+            : previous.campaignData,
+        };
+      });
+    } catch (error: any) {
+      setCreatorContractError(
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to upload signed contract."
+      );
+    } finally {
+      setIsCreatorContractSubmitting(false);
+    }
+  };
+
+  const rejectCreatorContract = async () => {
+    if (!creatorContractId || isCreatorContractSubmitting) return;
+
+    const confirmed = window.confirm("Are you sure you want to reject this contract?");
+    if (!confirmed) return;
+
+    setCreatorContractError("");
+    setIsCreatorContractSubmitting(true);
+
+    try {
+      await api.post("/contract/reject", {
+        contractId: creatorContractId,
+        influencerId: influencerIdValue || influencerId,
+        reason: "Rejected by creator",
+      });
+
+      setCreatorContractStatusLocal("rejected");
+
+      setDoc((previous: any) => {
+        if (!previous) return previous;
+
+        const patch = { isAccepted: 0, isRejected: 1, contractStatus: "rejected" };
+
+        return {
+          ...previous,
+          ...patch,
+          influencer: previous.influencer
+            ? { ...previous.influencer, ...patch }
+            : previous.influencer,
+          creator: previous.creator
+            ? { ...previous.creator, ...patch }
+            : previous.creator,
+          campaign: previous.campaign
+            ? { ...previous.campaign, ...patch }
+            : previous.campaign,
+          campaignData: previous.campaignData
+            ? { ...previous.campaignData, ...patch }
+            : previous.campaignData,
+          data: previous.data
+            ? {
+              ...previous.data,
+              influencer: previous.data.influencer
+                ? { ...previous.data.influencer, ...patch }
+                : previous.data.influencer,
+              campaign: previous.data.campaign
+                ? { ...previous.data.campaign, ...patch }
+                : previous.data.campaign,
+            }
+            : previous.data,
+        };
+      });
+    } catch (error: any) {
+      setCreatorContractError(
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to reject contract."
+      );
+    } finally {
+      setIsCreatorContractSubmitting(false);
+    }
+  };
 
   const countries = makeTextList(
     campaign?.targetCountries,
@@ -1515,24 +2444,12 @@ export default function SidebarCampaign({
     campaign?.application?.viewedByBrandAt
   );
 
-  const paymentCompletedAt = firstValidDate(
-    campaign?.paymentCompletedAt,
-    campaign?.payment?.completedAt,
-    campaign?.application?.paymentCompletedAt,
-    campaign?.completedAt
-  );
-
-  const paymentStatus = String(
-    campaign?.paymentStatus ?? campaign?.payment?.status ?? campaign?.application?.paymentStatus ?? ""
-  ).toLowerCase();
 
   const isBrandViewed =
     Boolean(brandViewedAt) ||
     Boolean(campaign?.isViewedByBrand) ||
     Boolean(campaign?.viewedByBrand);
 
-  const isPaymentCompleted =
-    Boolean(paymentCompletedAt) || paymentStatus.includes("complete");
 
   const applicationTimelineItems = [
     {
@@ -1558,13 +2475,13 @@ export default function SidebarCampaign({
       done: isBrandViewed,
     },
     {
-      title: isPaymentCompleted ? "Payment Completed" : "Payment Pending",
-      subtitle: paymentCompletedAt
-        ? formatTimelineDateTime(paymentCompletedAt)
-        : isPaymentCompleted
-          ? "Payment completed"
+      title: creatorContractId ? "Contract Sent By Brand" : "Contract Pending",
+      subtitle: creatorContractSentAt
+        ? formatTimelineDateTime(creatorContractSentAt)
+        : creatorContractId
+          ? "Contract received"
           : "Pending",
-      done: isPaymentCompleted,
+      done: Boolean(creatorContractId),
     },
   ];
 
@@ -1734,13 +2651,83 @@ export default function SidebarCampaign({
     window.open(pdfUrl, "_blank", "noopener,noreferrer");
   };
 
-  const onMailToBrand = () => {
-    if (!brandEmail) return;
-
-    window.location.href = `mailto:${brandEmail}?subject=${encodeURIComponent(
-      campaignTitle
-    )}`;
+  const notifyAction = (message: string) => {
+    setErr(message);
   };
+
+  const onMailToBrand = async () => {
+    if (isOpeningThread) return;
+
+    const brandId = pickString(
+      brand?.brandId,
+      brand?._id,
+      brand?.id,
+      campaign?.brandId,
+      campaign?.brand?._id,
+      campaign?.brand?.brandId,
+      root?.brandId,
+      root?.brand?._id,
+      brandIdValue
+    );
+
+    const currentInfluencerId = pickString(
+      influencer?.influencerId,
+      influencer?._id,
+      influencer?.id,
+      root?.influencerId,
+      root?.influencer?._id,
+      influencerIdValue,
+      influencerId
+    );
+
+    const currentCampaignId = pickString(
+      campaign?.campaignId,
+      campaign?._id,
+      campaign?.id,
+      root?.campaignId,
+      root?._id,
+      campaignIdValue,
+      campaignId
+    );
+
+    if (!brandId || !currentInfluencerId || !currentCampaignId) {
+      notifyAction(
+        "Unable to open inbox. Missing brand, influencer, or campaign details."
+      );
+      return;
+    }
+
+    setIsOpeningThread(true);
+
+    try {
+      const response = await api.post("/emails/threads", {
+        brandId,
+        influencerId: currentInfluencerId,
+        campaignId: currentCampaignId,
+        subject: pickString(campaign?.title, campaignTitle, "Campaign"),
+        type: "campaign",
+        source: "influencer_sidebar_campaign",
+      });
+
+      const threadId = getThreadIdFromResponse(response);
+
+      if (!threadId) {
+        throw new Error("Thread created, but threadId was not returned.");
+      }
+
+      router.push(`/influencer/inbox/${threadId}`);
+    } catch (error: any) {
+      notifyAction(
+        error?.response?.data?.error ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to open brand conversation."
+      );
+    } finally {
+      setIsOpeningThread(false);
+    }
+  };
+
   const handleApplyNow = () => {
     const now = new Date().toISOString();
 
@@ -1749,8 +2736,73 @@ export default function SidebarCampaign({
     onInvitationAccepted?.(invitationId);
   };
 
+  const templateContractCampaign = {
+    id: campaignIdValue,
+    title: campaignTitle,
+    productOrServiceName: campaignTitle,
+    brandId: brandIdValue,
+    brandName,
+    description: descriptionText,
+    budgetMin: 0,
+    budgetMax: Number.isFinite(budgetNum) ? budgetNum : 0,
+    daysLeft: 0,
+    match: 0,
+    category: categoryTags[0] || "",
+    platform: platforms[0] || "",
+    location: targetCountryText,
+    status: statusText,
+    campaignStatus: statusText,
+    timeline: { startDate: String(startAt || ""), endDate: String(endAt || "") },
+    isActive: Number(campaign?.isActive ?? 1),
+    budget: Number.isFinite(budgetNum) ? budgetNum : 0,
+    influencerBudget: Number(campaign?.influencerBudget || 0),
+    isApproved: 1,
+    isContracted: 1,
+    contractId: creatorContractId,
+    contractMongoId: creatorContractId,
+    isAccepted: Number(contractMeta?.isAccepted ?? campaign?.isAccepted ?? 0),
+    hasApplied: hasAppliedValue,
+    hasMilestone: Number(campaign?.hasMilestone || 0),
+    productImages: productImages as any[],
+    campaignType: paymentTypeText,
+    paymentType: paymentTypeText,
+    laneType: campaign?.laneType,
+    targetCountry: targetCountryText,
+    targetCountryValues: targetCountryText !== "—" ? [targetCountryText] : [],
+    targetCountries: countries,
+    campaignGoalValues: campaignGoalTags,
+    targetAgeGroupValues: ages.map((item: any) => String(item?.range || "")).filter(Boolean),
+    applicationStatus: campaign?.applicationStatus,
+    feeAmount: Number(contractMeta?.feeAmount || 0),
+    contractStatus: creatorContractStatus,
+  };
+
   const sidebarContent = (
-    <SidebarShell embedded={embedded}>
+    <SidebarShell
+      embedded={embedded}
+      footer={
+        showCreatorContractBar ? (
+          <CreatorContractFloatingBar
+            fileName={creatorContractFileName}
+            fileSize={creatorContractFileSize}
+            showDownload={isUploadedOwnContract}
+            disabled={isCreatorContractSubmitting}
+            isDownloading={isCreatorContractDownloading}
+            onReject={rejectCreatorContract}
+            onAccept={() => {
+              setCreatorContractError("");
+
+              if (isUploadedOwnContract) {
+                setCreatorOwnContractDialogOpen(true);
+              } else {
+                setTemplateContractSidebarOpen(true);
+              }
+            }}
+            onDownload={downloadCreatorContract}
+          />
+        ) : undefined
+      }
+    >
       <CampaignHeader
         logoUrl={logoUrl}
         title={campaignTitle}
@@ -1758,6 +2810,7 @@ export default function SidebarCampaign({
         ratingText={ratingText}
         statusText={statusText}
         onConnectBrand={onMailToBrand}
+        isOpeningThread={isOpeningThread}
       />
 
       <OverviewCompanyTabs activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -1768,7 +2821,10 @@ export default function SidebarCampaign({
         <>
           <ApplicationTimeline items={applicationTimelineItems} />
 
-          <StartConversationCard onMailToBrand={onMailToBrand} />
+          <StartConversationCard
+            onMailToBrand={onMailToBrand}
+            isOpeningThread={isOpeningThread}
+          />
 
           <section className="grid w-full grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-5">
             <TagCard title="Category" values={categoryTags} />
@@ -2169,6 +3225,45 @@ export default function SidebarCampaign({
           </section>
         </>
       )}
+
+      <CreatorOwnContractReuploadDialog
+        open={creatorOwnContractDialogOpen}
+        originalFileName={creatorContractFileName}
+        originalFileSize={creatorContractFileSize}
+        file={creatorOwnContractFile}
+        error={creatorContractError}
+        isSubmitting={isCreatorContractSubmitting}
+        isDownloading={isCreatorContractDownloading}
+        accepted={creatorOwnContractAccepted}
+        onAcceptedChange={setCreatorOwnContractAccepted}
+        onClose={() => {
+          setCreatorOwnContractDialogOpen(false);
+          setCreatorContractError("");
+          setCreatorOwnContractAccepted(false);
+          setCreatorOwnContractFile(null);
+        }}
+        onDownloadOriginal={downloadCreatorContract}
+        onFileSelected={(file) => {
+          setCreatorContractError("");
+          setCreatorOwnContractFile(file);
+        }}
+        onClearFile={() => {
+          setCreatorContractError("");
+          setCreatorOwnContractFile(null);
+        }}
+        onSubmit={submitUploadedOwnContract}
+      />
+
+      <InfluencerContractModal
+        open={templateContractSidebarOpen}
+        onClose={() => setTemplateContractSidebarOpen(false)}
+        contractId={creatorContractId}
+        campaign={templateContractCampaign as any}
+        sidebarOffset={influencerSidebarOffset}
+        onAfterAction={() => {
+          setCreatorContractStatusLocal("influencer_accepted");
+        }}
+      />
     </SidebarShell>
   );
 

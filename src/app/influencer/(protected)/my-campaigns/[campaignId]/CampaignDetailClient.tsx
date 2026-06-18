@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -12,6 +18,7 @@ import {
 import { ArrowUpRight } from "lucide-react";
 import {
   CalendarDots,
+  CheckCircle,
   CaretDown,
   CaretLeft,
   CaretRight,
@@ -28,6 +35,8 @@ import {
   getApiErrorMessage,
 } from "@/app/influencer/services/influencerApi";
 import api from "@/lib/api";
+import { Checkbox } from "@/components/animate-ui/components/radix/checkbox";
+import { cn } from "@/lib/utils";
 
 const PAGE_WRAP =
   "min-h-screen w-full bg-white px-4 pb-20 pt-8 sm:px-6 lg:px-10 xl:px-14";
@@ -90,17 +99,46 @@ type CampaignImage = {
 type CampaignDeliverable = {
   _id?: string;
   id?: string;
+  deliverableId?: string;
   milestoneId?: string;
+  milestoneHistoryId?: string;
   title?: string;
   name?: string;
+  deliverableName?: string;
   contentFormat?: string;
   format?: string;
+  delivery?: string;
+  deliveries?: string[];
+  deliveryTypes?: string[];
   dimensions?: string;
+  aspectRatio?: string;
   platform?: string;
+  platforms?: string[];
   status?: string;
   quantity?: number | string;
   dueDate?: string | null;
   deadline?: string | null;
+  submittedAt?: string | null;
+  deliverableLinks?: Array<{ label?: string; url?: string; linkId?: string }>;
+  submissionName?: string;
+  submissionNotes?: string;
+  submittedByInfluencerId?: string;
+  draftRequired?: boolean | number | string;
+  needDraftFirst?: boolean | number | string;
+  requiresDraft?: boolean | number | string;
+  preShootScriptRequired?: boolean | number | string;
+  draftDue?: string | null;
+  draftDate?: string | null;
+  draftSubmittedAt?: string | null;
+  draftLinks?: Array<{ label?: string; url?: string; linkId?: string }>;
+  draftNotes?: string;
+  preShootScriptDue?: string | null;
+  preShootScriptLinks?: Array<{
+    label?: string;
+    url?: string;
+    linkId?: string;
+  }>;
+  revisions?: any[];
   draftUrl?: string;
   deliveryUrl?: string;
   [key: string]: any;
@@ -109,23 +147,36 @@ type CampaignDeliverable = {
 type CampaignMilestone = {
   _id?: string;
   id?: string;
+  milestoneId?: string;
+  milestoneHistoryId?: string;
   title?: string;
   name?: string;
+  milestoneTitle?: string;
+  milestoneName?: string;
   status?: string;
+  payoutStatus?: string;
   dueDate?: string | null;
   deadline?: string | null;
   date?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
   percent?: number | string;
   progress?: number | string;
   amount?: number | string;
   budget?: number | string;
+  milestoneBudget?: number | string;
   description?: string;
+  milestoneDescription?: string;
   contentFormat?: string;
   platform?: string;
+  platforms?: string[];
   quantity?: number | string;
   deliverables?: CampaignDeliverable[];
   completedDeliverables?: number | string;
   totalDeliverables?: number | string;
+  released?: boolean;
+  releasedAt?: string | null;
+  paidAt?: string | null;
   [key: string]: any;
 };
 
@@ -212,6 +263,9 @@ type NormalizedMilestone = {
   deadline: string;
   raw: CampaignMilestone;
   deliverables: CampaignDeliverable[];
+  completedDeliverables: number;
+  totalDeliverables: number;
+  allDeliverablesSubmitted: boolean;
 };
 
 type PaymentHistoryRow = {
@@ -225,6 +279,20 @@ type PaymentHistoryRow = {
   receiptUrl: string;
   status: string;
 };
+
+type SubmissionMode = "draft" | "final";
+
+type SubmitDeliverableState = {
+  mode: SubmissionMode;
+  milestone: NormalizedMilestone;
+  deliverable: CampaignDeliverable;
+} | null;
+
+type ViewDeliverableState = {
+  milestone: NormalizedMilestone;
+  deliverable: CampaignDeliverable;
+  initialTab?: "about" | "submission";
+} | null;
 
 function asArray<T = any>(value: any): T[] {
   if (!value) return [];
@@ -348,6 +416,35 @@ function formatDate(value: any) {
   });
 }
 
+
+function formatTimelineDate(value: any) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return date.toLocaleString("en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function formatStatusText(value: any) {
+  const text = pickString(value, "-");
+  if (text === "-") return text;
+
+  return text
+    .replace(/[_-]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
 function formatNumericDate(value: any) {
   if (!value) return "-";
 
@@ -390,7 +487,8 @@ function daysBetween(startValue: any, endValue: any) {
   const start = new Date(startValue).getTime();
   const end = new Date(endValue).getTime();
 
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+    return 0;
   return Math.max(1, Math.ceil((end - start) / 86_400_000));
 }
 
@@ -417,7 +515,7 @@ function formatTimeline(startValue: any, endValue: any) {
     1,
     (end.getFullYear() - start.getFullYear()) * 12 +
       end.getMonth() -
-      start.getMonth()
+      start.getMonth(),
   );
 
   return `${monthDiff} month${monthDiff === 1 ? "" : "s"}`;
@@ -474,151 +572,323 @@ function getVideoThumb(url: string) {
 }
 
 function getStatus(campaign: CampaignData) {
-  return pickString(campaign.status, campaign.campaignStatus, "Active");
+  return pickString(campaign.status, campaign.campaignStatus);
 }
 
 function isLiveStatus(status: string) {
   const text = status.toLowerCase();
   return ["active", "live", "running", "ongoing"].some((item) =>
-    text.includes(item)
+    text.includes(item),
   );
+}
+
+function isCompletedStatus(value: any) {
+  const status = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  return ["completed", "complete", "approved", "paid", "released"].some(
+    (item) => status.includes(item),
+  );
+}
+
+function isSubmittedStatus(value: any) {
+  const status = String(value || "")
+    .trim()
+    .toLowerCase();
+
+  return ["submitted", "approved", "complete", "completed", "paid"].some(
+    (item) => status.includes(item),
+  );
+}
+
+function isTruthy(value: any) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") {
+    return ["true", "1", "yes", "on", "required"].includes(
+      value.trim().toLowerCase(),
+    );
+  }
+
+  return false;
+}
+
+function getLinkUrl(value: any) {
+  if (!value) return "";
+  if (typeof value === "string") return normalizeAssetUrl(value);
+
+  return normalizeAssetUrl(value.url || value.link || value.href || value.path);
+}
+
+function getLinkRows(value: any): Array<{ label: string; url: string }> {
+  return asArray<any>(value)
+    .map((item, index) => ({
+      label: pickString(item?.label, item?.name, `Link ${index + 1}`),
+      url: getLinkUrl(item),
+    }))
+    .filter((item) => item.url);
+}
+
+function getSubmittedLinks(deliverable: CampaignDeliverable) {
+  return [
+    ...getLinkRows(deliverable.deliverableLinks),
+    ...getLinkRows(deliverable.submissionLinks),
+    ...getLinkRows(deliverable.url),
+    ...getLinkRows(deliverable.deliveryUrl),
+  ];
+}
+
+function getDraftLinks(deliverable: CampaignDeliverable) {
+  return [
+    ...getLinkRows(deliverable.draftLinks),
+    ...getLinkRows(deliverable.preShootScriptLinks),
+    ...getLinkRows(deliverable.draftUrl),
+  ];
+}
+
+function getDeliverableSubmissionName(
+  deliverable: CampaignDeliverable,
+  index = 0,
+) {
+  return pickString(
+    deliverable.submissionName,
+    deliverable.submissionTitle,
+    deliverable.submittedName,
+    getDeliverableTitle(deliverable, index),
+  );
+}
+
+function getDeliverableAdditionalNotes(deliverable: CampaignDeliverable) {
+  return pickString(
+    deliverable.submissionNotes,
+    deliverable.additionalNotes,
+    deliverable.notes,
+    deliverable.comments,
+  );
+}
+
+function hasSubmittedDeliverable(deliverable: CampaignDeliverable) {
+  return (
+    isSubmittedStatus(deliverable.status) ||
+    getSubmittedLinks(deliverable).length > 0
+  );
+}
+
+function getContractDeliverables(campaign: CampaignData) {
+  return asArray<any>(campaign.contract?.content?.scheduleA?.deliverables);
+}
+
+function findContractDeliverableMeta(
+  campaign: CampaignData,
+  milestone: NormalizedMilestone,
+  deliverable: CampaignDeliverable,
+) {
+  const deliverableId = normalizeMongoId(
+    deliverable.deliverableId || deliverable._id || deliverable.id,
+  );
+  const deliverableName = getDeliverableTitle(deliverable, 0).toLowerCase();
+  const milestoneId = normalizeMongoId(
+    milestone.raw.sourceMilestoneId ||
+      milestone.raw.milestoneHistoryId ||
+      milestone.raw._id ||
+      milestone.raw.id,
+  );
+
+  return getContractDeliverables(campaign).find((item) => {
+    const itemId = normalizeMongoId(
+      item?.deliverableId || item?._id || item?.id,
+    );
+    const itemMilestoneId = normalizeMongoId(
+      item?.milestoneId || item?.sourceMilestoneId,
+    );
+    const itemName = pickString(
+      item?.deliverableName,
+      item?.deliverableFormat,
+      item?.name,
+      item?.title,
+    ).toLowerCase();
+
+    if (deliverableId && itemId && deliverableId === itemId) return true;
+    if (
+      milestoneId &&
+      itemMilestoneId &&
+      milestoneId === itemMilestoneId &&
+      itemName === deliverableName
+    )
+      return true;
+    if (itemName && itemName === deliverableName) return true;
+
+    return false;
+  });
+}
+
+function shouldShowAddDraft(
+  campaign: CampaignData,
+  milestone: NormalizedMilestone,
+  deliverable: CampaignDeliverable,
+) {
+  const contractMeta =
+    findContractDeliverableMeta(campaign, milestone, deliverable) || {};
+
+  return Boolean(
+    isTruthy(deliverable.draftRequired) ||
+    isTruthy(deliverable.needDraftFirst) ||
+    isTruthy(deliverable.requiresDraft) ||
+    isTruthy(deliverable.preShootScriptRequired) ||
+    isTruthy(milestone.raw.needDraftFirst) ||
+    isTruthy(milestone.raw.draftRequired) ||
+    isTruthy(contractMeta?.draftRequired) ||
+    isTruthy(contractMeta?.preShootScriptRequired) ||
+    isTruthy(campaign.contract?.content?.scheduleA?.preShootScriptRequired),
+  );
+}
+
+function getDeliverableQuantity(deliverable: CampaignDeliverable) {
+  const quantity = toNumber(deliverable.quantity);
+  return quantity > 0 ? Math.max(1, Math.round(quantity)) : 1;
 }
 
 function getMilestoneCount(campaign: CampaignData) {
   const milestones = asArray<CampaignMilestone>(campaign.milestones);
-  const total =
-    toNumber(campaign.totalMilestones) || milestones.length || 2;
+  const total = toNumber(campaign.totalMilestones) || milestones.length;
   const completed =
     toNumber(campaign.completedMilestones) ||
     milestones.filter((item) =>
-      String(item.status || "").toLowerCase().includes("complete")
-    ).length ||
-    1;
+      isCompletedStatus(
+        item.status || item.payoutStatus || (item.released ? "released" : ""),
+      ),
+    ).length;
 
   return { completed, total };
 }
 
+function getAllApiDeliverables(campaign: CampaignData) {
+  const milestoneDeliverables = asArray<CampaignMilestone>(
+    campaign.milestones,
+  ).flatMap((milestone) =>
+    asArray<CampaignDeliverable>(milestone.deliverables),
+  );
+
+  if (milestoneDeliverables.length) return milestoneDeliverables;
+
+  return asArray<CampaignDeliverable>(campaign.deliverables);
+}
+
 function getDeliverableCount(campaign: CampaignData) {
-  const deliverables = asArray<CampaignDeliverable>(campaign.deliverables);
-  const total =
-    toNumber(campaign.totalDeliverables) || deliverables.length || 4;
+  const deliverables = getAllApiDeliverables(campaign);
+  const total = toNumber(campaign.totalDeliverables) || deliverables.length;
   const completed =
     toNumber(campaign.completedDeliverables) ||
-    deliverables.filter((item) =>
-      ["complete", "submitted", "approved"].some((status) =>
-        String(item.status || "").toLowerCase().includes(status)
-      )
-    ).length ||
-    1;
+    deliverables.filter((item) => isSubmittedStatus(item.status)).length;
 
   return { completed, total };
 }
 
 function getMilestoneId(item: CampaignMilestone, index: number) {
-  return normalizeMongoId(item._id || item.id) || `milestone-${index + 1}`;
+  return (
+    normalizeMongoId(
+      item.milestoneHistoryId || item._id || item.id || item.milestoneId,
+    ) || `api-milestone-${index + 1}`
+  );
 }
 
 function getDeliverableId(item: CampaignDeliverable, index: number) {
-  return normalizeMongoId(item._id || item.id) || `deliverable-${index + 1}`;
+  return (
+    normalizeMongoId(item.deliverableId || item._id || item.id) ||
+    `api-deliverable-${index + 1}`
+  );
 }
 
-function getDefaultDeliverables(platform: string): CampaignDeliverable[] {
-  return [
-    {
-      id: "default-deliverable-1",
-      title: "Product launch reel",
-      contentFormat: "Reel (video)",
-      dimensions: "1080 × 1080",
-      platform,
-      status: "In Progress",
-      quantity: 1,
-    },
-    {
-      id: "default-deliverable-2",
-      title: "Product Final reel",
-      contentFormat: "Reel (video)",
-      dimensions: "1080 × 1080",
-      platform,
-      status: "Submitted",
-      quantity: 1,
-    },
-  ];
+function getDeliverableTitle(item: CampaignDeliverable, index: number) {
+  return pickString(
+    item.deliverableName,
+    item.title,
+    item.name,
+    `Deliverable ${index + 1}`,
+  );
 }
 
-function getNormalizedMilestones(campaign: CampaignData): NormalizedMilestone[] {
+function getDeliverableFormat(item: CampaignDeliverable) {
+  return pickString(
+    item.contentFormat,
+    item.format,
+    item.delivery,
+    asArray<string>(item.deliveries).join(", "),
+    asArray<string>(item.deliveryTypes).join(", "),
+  );
+}
+
+function getDeliverablePlatform(item: CampaignDeliverable) {
+  return pickString(item.platform, asArray<string>(item.platforms).join(", "));
+}
+
+function getNormalizedMilestones(
+  campaign: CampaignData,
+): NormalizedMilestone[] {
   const campaignMilestones = asArray<CampaignMilestone>(campaign.milestones);
   const allDeliverables = asArray<CampaignDeliverable>(campaign.deliverables);
-  const targetPlatforms = asArray<string>(campaign.targetPlatforms);
-  const fallbackPlatform = targetPlatforms[0] || "Instagram";
 
-  const sourceMilestones = campaignMilestones.length
-    ? campaignMilestones
-    : [
-        {
-          id: "sample-1",
-          title: "1st milestone",
-          description:
-            "Lorem Ipsum is simply dummy text of the printing and typesetting industry.",
-          platform: fallbackPlatform,
-          status: "Active",
-          quantity: 5,
-          dueDate: campaign.endAt,
-          deliverables: [],
-        },
-        {
-          id: "sample-2",
-          title: "2nd milestone",
-          description:
-            "Lorem Ipsum is simply dummy text of the printing and typesetting industry.",
-          platform: fallbackPlatform,
-          status: "Active",
-          quantity: 2,
-          dueDate: campaign.endAt,
-          deliverables: getDefaultDeliverables(fallbackPlatform),
-        },
-      ];
-
-  return sourceMilestones.map((item, index) => {
+  return campaignMilestones.map((item, index) => {
     const id = getMilestoneId(item, index);
-    const platform = pickString(
-      item.platform,
-      item.channel,
-      item.targetPlatform,
-      fallbackPlatform
-    );
     const relatedDeliverables = asArray<CampaignDeliverable>(item.deliverables)
       .concat(
         allDeliverables.filter((deliverable) => {
           const milestoneId = normalizeMongoId(
-            deliverable.milestoneId || deliverable.milestone || deliverable.milestone_id
+            deliverable.milestoneHistoryId ||
+              deliverable.milestoneId ||
+              deliverable.milestone ||
+              deliverable.milestone_id,
           );
           return milestoneId && milestoneId === id;
-        })
+        }),
       )
       .filter(Boolean);
 
-    const deliverables = relatedDeliverables.length
-      ? relatedDeliverables
-      : index === 1 || !campaignMilestones.length
-        ? getDefaultDeliverables(platform)
-        : [];
+    const firstDeliverable = relatedDeliverables[0] || null;
+    const platform = pickString(
+      item.platform,
+      asArray<string>(item.platforms).join(", "),
+      firstDeliverable ? getDeliverablePlatform(firstDeliverable) : "",
+    );
+
+    const completedDeliverables = relatedDeliverables.filter(
+      hasSubmittedDeliverable,
+    ).length;
+    const totalDeliverables = relatedDeliverables.length;
 
     return {
       id,
-      title: pickString(item.title, item.name, `Milestone ${index + 1}`),
+      title: pickString(
+        item.milestoneTitle,
+        item.milestoneName,
+        item.title,
+        item.name,
+        `Milestone ${index + 1}`,
+      ),
       content: pickString(
         item.contentFormat,
+        item.milestoneDescription,
         item.description,
         item.instructions,
-        asArray<string>(campaign.contentFormat).join(", "),
-        "-"
+        firstDeliverable ? getDeliverableFormat(firstDeliverable) : "",
       ),
       platform,
-      status: pickString(item.status, "Active"),
-      quantity: compactNumber(item.quantity || deliverables.length || 1),
-      deadline: formatNumericDate(item.dueDate || item.deadline || item.date || campaign.endAt),
+      status: pickString(
+        item.status,
+        item.payoutStatus,
+        item.released ? "released" : "pending",
+      ),
+      quantity: compactNumber(item.quantity || relatedDeliverables.length),
+      deadline: formatNumericDate(
+        item.dueDate || item.deadline || item.date || item.endDate,
+      ),
       raw: item,
-      deliverables,
+      deliverables: relatedDeliverables,
+      completedDeliverables,
+      totalDeliverables,
+      allDeliverablesSubmitted:
+        totalDeliverables > 0 && completedDeliverables === totalDeliverables,
     };
   });
 }
@@ -626,29 +896,29 @@ function getNormalizedMilestones(campaign: CampaignData): NormalizedMilestone[] 
 function getPaymentMilestoneRows(campaign: CampaignData) {
   const rows = getNormalizedMilestones(campaign);
   const currency = campaign.payout?.currency;
-  const totalBudget =
-    toNumber(campaign.totalPayout) ||
-    toNumber(campaign.payout?.total) ||
-    toNumber(campaign.payout?.max) ||
-    toNumber(campaign.payout?.min);
-  const rowBudgetFallback = rows.length ? totalBudget / rows.length : totalBudget;
 
-  return rows.map((row, index) => {
+  return rows.map((row) => {
     const raw = row.raw;
     const completedDeliverables =
       toNumber(raw.completedDeliverables) ||
       row.deliverables.filter((deliverable) =>
-        ["submitted", "complete", "approved", "paid"].some((status) =>
-          String(deliverable.status || "").toLowerCase().includes(status)
-        )
-      ).length ||
-      (index === 0 ? 1 : 1);
+        isSubmittedStatus(deliverable.status),
+      ).length;
     const totalDeliverables =
-      toNumber(raw.totalDeliverables) || toNumber(raw.quantity) || row.deliverables.length || (index === 0 ? 5 : 2);
+      toNumber(raw.totalDeliverables) ||
+      toNumber(raw.quantity) ||
+      row.deliverables.length;
     const progress =
       clampPercent(raw.percent ?? raw.progress) ||
-      Math.min(100, Math.round((completedDeliverables / Math.max(1, totalDeliverables)) * 100));
-    const budget = toNumber(raw.amount || raw.budget) || rowBudgetFallback;
+      (totalDeliverables
+        ? Math.min(
+            100,
+            Math.round(
+              (completedDeliverables / Math.max(1, totalDeliverables)) * 100,
+            ),
+          )
+        : 0);
+    const budget = toNumber(raw.amount || raw.milestoneBudget || raw.budget);
 
     return {
       ...row,
@@ -670,50 +940,74 @@ function getContractFile(campaign: CampaignData) {
   );
 }
 
-function getContractDetails(campaign: CampaignData, influencer: InfluencerData) {
+function getContractDetails(
+  campaign: CampaignData,
+  influencer: InfluencerData,
+) {
   const contract = campaign.contract || {};
 
   return [
     {
       label: "Contract ID",
-      value: pickString(contract.contractId, contract._id, influencer.contractId, "-"),
+      value: pickString(
+        contract.contractId,
+        contract._id,
+        influencer.contractId,
+        "-",
+      ),
     },
     {
       label: "Status",
-      value: pickString(contract.status, influencer.contractStatus, "Completed"),
+      value: pickString(contract.status, influencer.contractStatus, "-"),
       badge: true,
     },
     {
       label: "Signed by YOU",
       value: formatDate(
-        getFirstValue(contract, ["signedByYouAt", "influencerSignedAt", "signedAt"])
+        getFirstValue(contract, [
+          "signedByYouAt",
+          "influencerSignedAt",
+          "signedAt",
+        ]),
       ),
     },
     {
       label: "Signed by Brand",
       value: formatDate(
-        getFirstValue(contract, ["signedByBrandAt", "brandSignedAt", "brandSignedOn"])
+        getFirstValue(contract, [
+          "signedByBrandAt",
+          "brandSignedAt",
+          "brandSignedOn",
+        ]),
       ),
     },
     {
       label: "Usage Rights",
-      value: pickString(contract.usageRights, campaign.usageRights, "6 months"),
+      value: pickString(contract.usageRights, campaign.usageRights, "-"),
     },
     {
       label: "Content Ownership",
-      value: pickString(contract.contentOwnership, campaign.contentOwnership, "Non-exclusive"),
+      value: pickString(
+        contract.contentOwnership,
+        campaign.contentOwnership,
+        "-",
+      ),
     },
     {
       label: "Payment Type",
-      value: pickString(contract.paymentType, campaign.paymentType, "Milestone-based"),
+      value: pickString(contract.paymentType, campaign.paymentType, "-"),
     },
     {
       label: "Payment Terms",
-      value: pickString(contract.paymentTerms, campaign.paymentTerms, "40/60 Split"),
+      value: pickString(contract.paymentTerms, campaign.paymentTerms, "-"),
     },
     {
       label: "Exclusivity Period",
-      value: pickString(contract.exclusivityPeriod, campaign.exclusivityPeriod, "30 days"),
+      value: pickString(
+        contract.exclusivityPeriod,
+        campaign.exclusivityPeriod,
+        "-",
+      ),
     },
   ];
 }
@@ -721,68 +1015,163 @@ function getContractDetails(campaign: CampaignData, influencer: InfluencerData) 
 function getPaymentHistory(campaign: CampaignData): PaymentHistoryRow[] {
   const currency = campaign.payout?.currency;
   const sourceRows = asArray<any>(
-    campaign.paymentHistory || campaign.transactions || campaign.payments
+    campaign.paymentHistory || campaign.transactions || campaign.payments,
   );
 
   if (sourceRows.length) {
     return sourceRows.map((item, index) => {
       const amount = toNumber(item.amount || item.value || item.total);
-      const status = pickString(item.status, item.paymentStatus, "Completed");
+      const status = pickString(item.status, item.paymentStatus, "-");
       const type =
-        String(item.type || item.kind || "").toLowerCase().includes("fee") || amount < 0
+        String(item.type || item.kind || "")
+          .toLowerCase()
+          .includes("fee") || amount < 0
           ? "debit"
           : "credit";
-      const signedAmount = type === "debit" ? -Math.abs(amount) : Math.abs(amount);
+      const signedAmount =
+        type === "debit" ? -Math.abs(amount) : Math.abs(amount);
 
       return {
         id: normalizeMongoId(item._id || item.id) || `payment-${index + 1}`,
-        name: pickString(item.title, item.name, item.description, "Milestone Payment"),
-        subId: pickString(item.referenceId, item.reference, item.transactionId, item.txnId, "-"),
+        name: pickString(
+          item.title,
+          item.name,
+          item.description,
+          `Payment ${index + 1}`,
+        ),
+        subId: pickString(
+          item.referenceId,
+          item.reference,
+          item.transactionId,
+          item.txnId,
+          "-",
+        ),
         txnId: pickString(item.transactionId, item.txnId, item.id, "-"),
         amount: signedAmount,
         amountLabel: formatSignedMoney(signedAmount, currency),
         type,
-        receiptUrl: normalizeAssetUrl(item.receiptUrl || item.pdfUrl || item.file?.url),
+        receiptUrl: normalizeAssetUrl(
+          item.receiptUrl || item.pdfUrl || item.file?.url,
+        ),
         status,
       };
     });
   }
 
-  return [
-    {
-      id: "late-fee",
-      name: "late fees Charges",
-      subId: "TXN-12525",
-      txnId: "TXN-1245",
-      amount: -20,
-      amountLabel: "-$20",
-      type: "debit",
-      receiptUrl: "",
-      status: "Completed",
-    },
-    {
-      id: "revision-fee",
-      name: "Revision fees",
-      subId: "TXN-1245",
-      txnId: "TXN-1245",
-      amount: 2000,
-      amountLabel: "+$2000",
-      type: "credit",
-      receiptUrl: "",
-      status: "Completed",
-    },
-    {
-      id: "milestone-payment",
-      name: "Milestone Payment",
-      subId: "TXN-1245",
-      txnId: "TXN-1245",
-      amount: 2000,
-      amountLabel: "+$2000",
-      type: "credit",
-      receiptUrl: "",
-      status: "Completed",
-    },
+  return [];
+}
+function extractApiArray(payload: any, keys: string[]) {
+  const candidates = [
+    payload,
+    payload?.data,
+    payload?.data?.data,
+    payload?.result,
   ];
+
+  for (const source of candidates) {
+    if (!source) continue;
+
+    if (Array.isArray(source)) return source;
+
+    for (const key of keys) {
+      const value = source?.[key];
+      if (Array.isArray(value)) return value;
+      if (Array.isArray(value?.data)) return value.data;
+      if (Array.isArray(value?.items)) return value.items;
+    }
+  }
+
+  return [];
+}
+
+function normalizeMilestoneApiRows(rows: any[]): CampaignMilestone[] {
+  return rows.map((row, index) => ({
+    ...row,
+    id: pickString(
+      row.milestoneHistoryId,
+      row._id,
+      row.id,
+      `api-milestone-${index + 1}`,
+    ),
+    title: pickString(row.milestoneTitle, row.title, row.name),
+    name: pickString(row.milestoneTitle, row.title, row.name),
+    description: pickString(row.milestoneDescription, row.description),
+    amount: row.amount ?? row.milestoneBudget ?? row.budget,
+    budget: row.milestoneBudget ?? row.amount ?? row.budget,
+    status: pickString(
+      row.status,
+      row.payoutStatus,
+      row.released ? "released" : "pending",
+    ),
+    endDate: row.endDate ?? row.dueDate ?? row.deadline ?? null,
+    deliverables: asArray<CampaignDeliverable>(row.deliverables),
+  }));
+}
+
+async function fetchMilestonesFromApi({
+  influencerId,
+  campaignId,
+  brandId,
+}: {
+  influencerId: string;
+  campaignId: string;
+  brandId?: string;
+}) {
+  if (!influencerId || !campaignId) return [];
+
+  const response = await api.post("/milestone/getMilestome", {
+    influencerId,
+    campaignId,
+    ...(brandId ? { brandId } : {}),
+  });
+
+  const payload = response?.data ?? response;
+  const rows = extractApiArray(payload, [
+    "milestones",
+    "items",
+    "data",
+    "results",
+  ]);
+
+  return normalizeMilestoneApiRows(rows);
+}
+
+function mergeCampaignWithApiMilestones(
+  campaign: CampaignData,
+  apiMilestones: CampaignMilestone[],
+): CampaignData {
+  if (!apiMilestones.length) {
+    return {
+      ...campaign,
+      milestones: asArray<CampaignMilestone>(campaign.milestones),
+      deliverables: asArray<CampaignDeliverable>(campaign.deliverables),
+    };
+  }
+
+  return {
+    ...campaign,
+    milestones: apiMilestones,
+    deliverables: apiMilestones.flatMap((milestone) =>
+      asArray<CampaignDeliverable>(milestone.deliverables),
+    ),
+    totalMilestones: apiMilestones.length,
+    completedMilestones: apiMilestones.filter((milestone) =>
+      isCompletedStatus(milestone.status || milestone.payoutStatus),
+    ).length,
+    totalDeliverables: apiMilestones.reduce(
+      (sum, milestone) =>
+        sum + asArray<CampaignDeliverable>(milestone.deliverables).length,
+      0,
+    ),
+    completedDeliverables: apiMilestones.reduce(
+      (sum, milestone) =>
+        sum +
+        asArray<CampaignDeliverable>(milestone.deliverables).filter(
+          (deliverable) => isSubmittedStatus(deliverable.status),
+        ).length,
+      0,
+    ),
+  };
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -818,11 +1207,14 @@ function EmptyValue() {
 
 function StatusBadge({ status }: { status: string }) {
   const lower = status.toLowerCase();
-  const dotClass = lower.includes("submitted") || lower.includes("paid")
-    ? "bg-[#84CAFF]"
-    : lower.includes("active") || lower.includes("progress") || lower.includes("complete")
-      ? "bg-[#17B26A]"
-      : "bg-[#B8B8B8]";
+  const dotClass =
+    lower.includes("submitted") || lower.includes("paid")
+      ? "bg-[#84CAFF]"
+      : lower.includes("active") ||
+          lower.includes("progress") ||
+          lower.includes("complete")
+        ? "bg-[#17B26A]"
+        : "bg-[#B8B8B8]";
 
   return (
     <span className="inline-flex h-8 items-center gap-2 rounded-full bg-[#F9F9F9] px-3 text-[0.75rem] font-medium leading-5 text-[#969696]">
@@ -886,7 +1278,13 @@ function PlatformIcon({ platform }: { platform: string }) {
   return <Pill>{platform}</Pill>;
 }
 
-function DetailBox({ label, children }: { label: string; children: React.ReactNode }) {
+function DetailBox({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="rounded-[0.75rem] border border-[#E6E6E6] p-4">
       <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
@@ -940,7 +1338,7 @@ function CampaignHeader({
   const campaignTitle = pickString(campaign.title, "Campaign");
   const logoUrl = normalizeAssetUrl(brand.profilePic);
   const website = pickString(brand.website, campaign.productUrl);
-  const rating = pickString(campaign.rating, brand.rating, "2.9");
+  const rating = pickString(campaign.rating, brand.rating);
   const status = getStatus(campaign);
 
   return (
@@ -994,7 +1392,9 @@ function CampaignHeader({
 
             <div className="mt-2 flex items-center gap-2 text-[0.75rem] leading-4 text-[#969696]">
               <CalendarDots weight="bold" className="h-4 w-4" />
-              <span>{formatCampaignRange(campaign.startAt, campaign.endAt)}</span>
+              <span>
+                {formatCampaignRange(campaign.startAt, campaign.endAt)}
+              </span>
             </div>
           </div>
         </div>
@@ -1081,7 +1481,7 @@ function CampaignTabs({ activeTab }: { activeTab: ActiveTab }) {
   const searchParams = useSearchParams();
   const basePath = useMemo(
     () => pathname.replace(/\/(milestone-and-deliverables|payment)\/?$/, ""),
-    [pathname]
+    [pathname],
   );
   const querySuffix = useMemo(() => {
     const query = searchParams.toString();
@@ -1089,13 +1489,21 @@ function CampaignTabs({ activeTab }: { activeTab: ActiveTab }) {
   }, [searchParams]);
 
   const tabs = [
-    { key: "overview" as const, label: "Overview", href: `${basePath}${querySuffix}` },
+    {
+      key: "overview" as const,
+      label: "Overview",
+      href: `${basePath}${querySuffix}`,
+    },
     {
       key: "milestones" as const,
       label: "Milestone & Deliverables",
       href: `${basePath}/milestone-and-deliverables${querySuffix}`,
     },
-    { key: "payment" as const, label: "Payment", href: `${basePath}/payment${querySuffix}` },
+    {
+      key: "payment" as const,
+      label: "Payment",
+      href: `${basePath}/payment${querySuffix}`,
+    },
   ];
 
   return (
@@ -1127,7 +1535,13 @@ function CampaignTabs({ activeTab }: { activeTab: ActiveTab }) {
   );
 }
 
-function SummaryCell({ label, children }: { label: string; children: React.ReactNode }) {
+function SummaryCell({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="p-4">
       <div className="text-[0.875rem] font-medium leading-5 text-[#B8B8B8]">
@@ -1145,13 +1559,20 @@ function SummaryCard({ campaign }: { campaign: CampaignData }) {
   const deliverableCount = getDeliverableCount(campaign);
   const contentFormat = asArray<string>(campaign.contentFormat);
   const contentLanguage = asArray<string>(campaign.contentLanguage).join(", ");
-  const activeDate = pickString(campaign.activeDate, formatShortDate(campaign.startAt));
+  const activeDate = pickString(
+    campaign.activeDate,
+    formatShortDate(campaign.startAt),
+  );
 
   return (
     <Card className="overflow-hidden">
       <div className="grid grid-cols-1 divide-y divide-[#E6E6E6] md:grid-cols-3 md:divide-x md:divide-y-0">
         <SummaryCell label="Campaign Fees">
-          {formatMoneyRange(campaign.payout?.min, campaign.payout?.max, campaign.payout?.currency)}
+          {formatMoneyRange(
+            campaign.payout?.min,
+            campaign.payout?.max,
+            campaign.payout?.currency,
+          )}
         </SummaryCell>
         <SummaryCell label="Milestones">
           {String(milestoneCount.completed).padStart(2, "0")}/
@@ -1189,7 +1610,9 @@ function AudienceCard({ campaign }: { campaign: CampaignData }) {
   const targetCountries = asArray<string>(campaign.targetCountries);
   const targetPlatforms = asArray<string>(campaign.targetPlatforms);
   const videoReferenceUrl = pickString(campaign.videoReferenceUrl);
-  const videoThumbUrl = videoReferenceUrl ? getVideoThumb(videoReferenceUrl) : "";
+  const videoThumbUrl = videoReferenceUrl
+    ? getVideoThumb(videoReferenceUrl)
+    : "";
 
   return (
     <Card className="p-4">
@@ -1320,7 +1743,7 @@ function ImageReferenceCarousel({ images }: { images: string[] }) {
   };
 
   return (
-    <section className="mt-7">
+    <section className="mt-5">
       <h2 className="text-[1.25rem] font-semibold leading-7 text-[#1A1A1A]">
         Image / Reference
       </h2>
@@ -1374,7 +1797,8 @@ function ImageReferenceCarousel({ images }: { images: string[] }) {
                   aria-label={`Go to image ${index + 1}`}
                   className="h-2 w-2 rounded-full"
                   style={{
-                    backgroundColor: index === activeSlide ? "#1A1A1A" : "#E8E8E8",
+                    backgroundColor:
+                      index === activeSlide ? "#1A1A1A" : "#E8E8E8",
                   }}
                 />
               ))}
@@ -1453,7 +1877,13 @@ function PdfAttachmentCard({ file }: { file?: CampaignFile | null }) {
   );
 }
 
-function RowAction({ title, onClick }: { title: string; onClick?: () => void }) {
+function RowAction({
+  title,
+  onClick,
+}: {
+  title: string;
+  onClick?: () => void;
+}) {
   return (
     <button
       type="button"
@@ -1471,7 +1901,9 @@ function OverviewPageContent({
   onGoToMilestoneSection,
 }: {
   campaign: CampaignData;
-  onGoToMilestoneSection: (sectionId: "revision-history" | "deliverables") => void;
+  onGoToMilestoneSection: (
+    sectionId: "revision-history" | "deliverables",
+  ) => void;
 }) {
   const descriptionText = pickString(campaign.description);
   const additionalNotesText = pickString(campaign.additionalNotes);
@@ -1488,7 +1920,8 @@ function OverviewPageContent({
             Overview
           </h2>
           <p className="mt-2 text-[0.875rem] leading-5 text-[#B8B8B8]">
-            Track campaign progress, creator participation, deliverables, and overall performance from a single place.
+            Track campaign progress, creator participation, deliverables, and
+            overall performance from a single place.
           </p>
         </div>
 
@@ -1512,7 +1945,7 @@ function OverviewPageContent({
 
       <ImageReferenceCarousel images={carouselImages} />
 
-      <section className="mt-7">
+      <section className="mt-5">
         <h2 className="text-[1.25rem] font-semibold leading-7 text-[#1A1A1A]">
           Additional Information
         </h2>
@@ -1566,13 +1999,764 @@ function OverviewPageContent({
   );
 }
 
+function FloatingInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  rightIcon,
+  type = "text",
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  rightIcon?: React.ReactNode;
+  type?: React.HTMLInputTypeAttribute;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="relative h-[3.875rem] rounded-[0.75rem] border border-[#E6E6E6] bg-white">
+      <input
+        type={type}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder=" "
+        className={[
+          "peer h-full w-full rounded-[0.75rem] border-none bg-transparent pb-[0.625rem] pl-4 pr-12 pt-[1.55rem]",
+          "text-[1rem] font-medium leading-[1.5rem] text-[#1A1A1A] outline-none",
+          "placeholder:text-transparent disabled:cursor-not-allowed disabled:opacity-60",
+        ].join(" ")}
+      />
+
+      <span
+        className={[
+          "pointer-events-none absolute left-4 top-[0.55rem] z-10 translate-y-0 text-[0.75rem] font-medium leading-4 text-[#969696] transition-all",
+          "peer-placeholder-shown:top-1/2 peer-placeholder-shown:-translate-y-1/2 peer-placeholder-shown:text-[1rem] peer-placeholder-shown:leading-[1.5rem] peer-placeholder-shown:text-[#B8B8B8]",
+          "peer-focus:top-[0.55rem] peer-focus:translate-y-0 peer-focus:text-[0.75rem] peer-focus:leading-4 peer-focus:text-[#969696]",
+        ].join(" ")}
+      >
+        {label || placeholder}
+      </span>
+
+      {rightIcon ? (
+        <span className="pointer-events-none absolute right-4 top-1/2 flex -translate-y-1/2 items-center text-[#969696]">
+          {rightIcon}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function LabeledTextArea({
+  label,
+  value,
+  onChange,
+  placeholder,
+  maxLength,
+  rows = 5,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  maxLength?: number;
+  rows?: number;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="block rounded-[0.75rem] border border-[#E6E6E6] bg-white px-4 py-3">
+      <span className="block border-b border-[#E6E6E6] pb-2.5 text-[1rem] font-semibold leading-[1.5rem] text-[#969696]">
+        {label}
+      </span>
+
+      <textarea
+        value={value}
+        maxLength={maxLength}
+        rows={rows}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-3 w-full resize-none border-none bg-transparent text-[0.9375rem] leading-[1.5rem] text-[#1A1A1A] outline-none placeholder:text-[#B8B8B8] disabled:cursor-not-allowed disabled:opacity-60"
+        placeholder={placeholder}
+      />
+
+      {typeof maxLength === "number" ? (
+        <div className="text-right text-[0.875rem] leading-5 text-[#B8B8B8]">
+          {value.length}/{maxLength}
+        </div>
+      ) : null}
+    </label>
+  );
+}
+
+function SubmitDeliverableModal({
+  state,
+  influencerId,
+  onClose,
+  onSubmitted,
+}: {
+  state: SubmitDeliverableState;
+  influencerId: string;
+  onClose: () => void;
+  onSubmitted: (message: string) => void;
+}) {
+  const [submissionName, setSubmissionName] = useState("");
+  const [links, setLinks] = useState<string[]>([""]);
+  const [notes, setNotes] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [confirmedInvalid, setConfirmedInvalid] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const maxNotes = 500;
+
+  useEffect(() => {
+    if (!state) return;
+
+    const deliverable = state.deliverable;
+    const existingLinks =
+      state.mode === "draft"
+        ? getDraftLinks(deliverable)
+        : getSubmittedLinks(deliverable);
+    const quantity =
+      state.mode === "draft" ? 1 : getDeliverableQuantity(deliverable);
+    const nextLinks = Array.from(
+      { length: Math.max(1, quantity) },
+      (_, index) => existingLinks[index]?.url || "",
+    );
+
+    setSubmissionName(getDeliverableSubmissionName(deliverable, 0));
+    setLinks(nextLinks);
+    setNotes(
+      pickString(
+        state.mode === "draft"
+          ? deliverable.draftNotes
+          : getDeliverableAdditionalNotes(deliverable),
+      ),
+    );
+    setConfirmed(false);
+    setConfirmedInvalid(false);
+    setIsSubmitting(false);
+  }, [state]);
+
+  if (!state) return null;
+
+  const { mode, milestone, deliverable } = state;
+  const isDraft = mode === "draft";
+  const title = `${isDraft ? "Submit Draft" : hasSubmittedDeliverable(deliverable) ? "Update" : "Submit"} ${getDeliverableTitle(deliverable, 0)}`;
+  const allLinksValid = links.every((item) => normalizeAssetUrl(item));
+  const canSubmit = Boolean(
+    submissionName.trim() && allLinksValid && !isSubmitting,
+  );
+
+  const updateLink = (index: number, value: string) => {
+    setLinks((current) =>
+      current.map((item, itemIndex) => (itemIndex === index ? value : item)),
+    );
+  };
+
+  const submit = async () => {
+    if (!canSubmit) return;
+
+    if (!confirmed) {
+      setConfirmedInvalid(true);
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const payload = {
+        influencerId,
+        milestoneId: pickString(
+          milestone.raw.milestoneId,
+          milestone.raw.parentMilestoneId,
+        ),
+        milestoneHistoryId: pickString(
+          milestone.raw.milestoneHistoryId,
+          milestone.raw._id,
+          milestone.id,
+        ),
+        deliverableId: pickString(
+          deliverable.deliverableId,
+          deliverable._id,
+          deliverable.id,
+        ),
+        submissionType: isDraft ? "draft" : "final",
+        submissionName: submissionName.trim(),
+        notes: notes.trim(),
+        additionalNotes: notes.trim(),
+        deliverableLinks: links.map((url, index) => ({
+          label: isDraft
+            ? `Draft Link ${index + 1}`
+            : `Submission Link ${index + 1}`,
+          url: normalizeAssetUrl(url),
+        })),
+      };
+
+      await api.post("/milestone/submitDeliverable", payload);
+      onSubmitted(
+        isDraft
+          ? "Draft submitted successfully."
+          : "Deliverable submitted successfully.",
+      );
+      onClose();
+    } catch (error: any) {
+      onSubmitted(
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          error?.message ||
+          "Unable to submit deliverable.",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex min-h-screen items-center justify-center bg-black/20 px-4 py-5"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="max-h-[90vh] w-full max-w-[48rem] overflow-y-auto rounded-[1rem] bg-white p-4 shadow-[0_20px_60px_rgba(0,0,0,0.18)] sm:p-6">
+        <div className="flex items-start justify-between gap-4 border-b border-[#D9D9D9] pb-4">
+          <h2 className="text-[1.25rem] font-semibold leading-7 text-[#1A1A1A]">
+            {title}
+          </h2>
+          <div className="flex items-center gap-6">
+            <span className="hidden text-[0.9375rem] font-semibold text-[#B8B8B8] sm:inline">
+              {formatDate(new Date())}
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-[1.5rem] leading-none text-[#1A1A1A]"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3.5">
+          <FloatingInput
+            label="Submission Name"
+            value={submissionName}
+            onChange={setSubmissionName}
+            placeholder="Submission name"
+          />
+
+          {links.map((value, index) => (
+            <FloatingInput
+              key={index}
+              label={
+                isDraft
+                  ? "Draft Link"
+                  : links.length > 1
+                    ? `Submission Link ${index + 1}`
+                    : "Submission Link"
+              }
+              value={value}
+              onChange={(nextValue) => updateLink(index, nextValue)}
+              placeholder={
+                isDraft
+                  ? "Draft link"
+                  : links.length > 1
+                    ? `Submission link ${index + 1}`
+                    : "Submission link"
+              }
+              rightIcon={<LinkSimple className="h-5 w-5" />}
+            />
+          ))}
+
+          <LabeledTextArea
+            label="Additional Notes"
+            value={notes}
+            maxLength={maxNotes}
+            onChange={setNotes}
+            rows={4}
+            placeholder="Add a message or additional Information to the brand..."
+          />
+
+          <label className="flex items-start gap-3 text-[0.9375rem] leading-6 text-[#1A1A1A]">
+            <Checkbox
+              checked={confirmed}
+              onCheckedChange={(v) => {
+                setConfirmed(v === true);
+                if (confirmedInvalid) setConfirmedInvalid(false);
+              }}
+              onClick={() => {
+                if (confirmedInvalid) setConfirmedInvalid(false);
+              }}
+              aria-invalid={confirmedInvalid}
+              className={cn(
+                "mt-0.5 bg-background border rounded-[4px] w-[20px] h-[20px] p-[4px] shrink-0",
+                confirmedInvalid
+                  ? "border-[color:var(--Errors-500,#E35141)]"
+                  : "border-[color:var(--Border-Primary,#B3B3B3)]",
+              )}
+            />
+            <span>
+              I Confirm that Updating the Content follows the Campaign
+              Guidelines and requirements.
+            </span>
+          </label>
+        </div>
+
+        <div className="mt-5 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-9 rounded-[0.75rem] px-5 text-[0.875rem] font-semibold text-[#1A1A1A]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit}
+            className="h-9 min-w-[7.5rem] rounded-[0.75rem] bg-[#1A1A1A] px-6 text-[0.875rem] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSubmitting
+              ? "Submitting..."
+              : hasSubmittedDeliverable(deliverable) && !isDraft
+                ? "Update"
+                : "Submit"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeliverableDetailRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[10.5rem_minmax(0,1fr)]">
+      <div className="text-[0.875rem] font-medium leading-5 text-[#969696]">
+        {label}
+      </div>
+      <div className="min-w-0 break-words text-[0.875rem] font-semibold leading-5 text-[#1A1A1A]">
+        {children || "-"}
+      </div>
+    </div>
+  );
+}
+
+
+function SubmissionOpenLink({
+  links,
+}: {
+  links: Array<{ label?: string; url?: string }>;
+}) {
+  const rows = links.filter((item) => item.url);
+
+  if (!rows.length) return <EmptyValue />;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {rows.map((link, index) => (
+        <a
+          key={`${link.url}-${index}`}
+          href={link.url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex w-fit items-center gap-2 text-[0.875rem] font-semibold leading-5 text-[#1A1A1A] underline underline-offset-2"
+        >
+          Open Link
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-[0.25rem] bg-[#F2F2F2] text-[#6D6D6D]">
+            <LinkSimple className="h-3.5 w-3.5" />
+          </span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function SubmissionStatusBadge({ status }: { status: string }) {
+  return (
+    <span className="inline-flex h-6 w-fit items-center gap-1.5 rounded-full bg-[#F9F9F9] px-2 text-[0.75rem] font-medium leading-4 text-[#969696]">
+      <span className="h-2 w-2 rounded-full bg-[#84CAFF]" />
+      {formatStatusText(status)}
+    </span>
+  );
+}
+
+function TimelineStatusIcon({ completed }: { completed: boolean }) {
+  if (completed) {
+    return (
+      <CheckCircle
+        weight="fill"
+        className="relative z-10 h-5 w-5 shrink-0 text-[#28A745]"
+      />
+    );
+  }
+
+  return (
+    <span className="relative z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-[#FDB022] bg-white">
+      <span className="h-2 w-2 rounded-full bg-[#FDB022]" />
+    </span>
+  );
+}
+
+function SubmissionTimelineItem({
+  title,
+  date,
+  completed,
+  isLast,
+}: {
+  title: string;
+  date: any;
+  completed: boolean;
+  isLast: boolean;
+}) {
+  return (
+    <div
+      className={[
+        "relative flex gap-3",
+        !isLast
+          ? "after:absolute after:left-[0.5625rem] after:top-7 after:h-[calc(100%+0.75rem)] after:w-px after:bg-[#E6E6E6]"
+          : "",
+      ].join(" ")}
+    >
+      <TimelineStatusIcon completed={completed} />
+      <div className="min-w-0 pb-5">
+        <div className="text-[0.875rem] font-semibold leading-5 text-[#1A1A1A]">
+          {title}
+        </div>
+        <div className="mt-0.5 text-[0.75rem] font-normal leading-4 text-[#B8B8B8]">
+          {formatTimelineDate(date)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeliverableViewModal({
+  state,
+  campaign,
+  onClose,
+  onSubmitDeliverable,
+}: {
+  state: ViewDeliverableState;
+  campaign: CampaignData;
+  onClose: () => void;
+  onSubmitDeliverable: (
+    milestone: NormalizedMilestone,
+    deliverable: CampaignDeliverable,
+    mode: SubmissionMode,
+  ) => void;
+}) {
+  const [activeTab, setActiveTab] = useState<"about" | "submission">("about");
+
+  useEffect(() => {
+    if (!state) return;
+    setActiveTab(state.initialTab || "about");
+  }, [state]);
+
+  if (!state) return null;
+
+  const { milestone, deliverable } = state;
+  const hasSubmission = hasSubmittedDeliverable(deliverable);
+  const submittedLinks = getSubmittedLinks(deliverable);
+  const draftLinks = getDraftLinks(deliverable);
+  const status = pickString(deliverable.status, "pending");
+  const submissionName = getDeliverableSubmissionName(deliverable, 0);
+  const submissionNotes = getDeliverableAdditionalNotes(deliverable);
+  const revisionRows = asArray<any>(deliverable.revisions);
+  const contractMeta =
+    findContractDeliverableMeta(campaign, milestone, deliverable) || {};
+  const revisionType = revisionRows.length
+    ? pickString(revisionRows[revisionRows.length - 1]?.revisionType, "-")
+    : "-";
+  const revisionPayout = revisionRows.length
+    ? formatMoney(
+        revisionRows[revisionRows.length - 1]?.revisionBudget,
+        campaign.payout?.currency,
+      )
+    : "-";
+  const draftSubmittedAt =
+    deliverable.draftSubmittedAt || deliverable.preShootScriptSubmittedAt;
+  const preShootViewedAt =
+    deliverable.preShootScriptViewedAt ||
+    deliverable.draftViewedAt ||
+    deliverable.viewedAt;
+  const preShootApprovedAt =
+    deliverable.preShootScriptApprovedAt ||
+    deliverable.draftApprovedAt ||
+    deliverable.approvedPreShootAt;
+  const hasDraftFlow = Boolean(draftLinks.length || draftSubmittedAt);
+  const hasDeliverySubmitted = Boolean(deliverable.submittedAt || submittedLinks.length);
+  const fallbackTimelineDate =
+    deliverable.submittedAt ||
+    draftSubmittedAt ||
+    deliverable.deadline ||
+    deliverable.dueDate ||
+    milestone.raw.endDate;
+  const timelineItems = [
+    ...(hasDraftFlow
+      ? [
+          {
+            title: "Pre-shoot Script Submitted",
+            date: draftSubmittedAt || fallbackTimelineDate,
+            completed: Boolean(draftSubmittedAt || draftLinks.length),
+          },
+          {
+            title: "Pre-shoot Viewed by Brand",
+            date: preShootViewedAt || draftSubmittedAt || fallbackTimelineDate,
+            completed: Boolean(preShootViewedAt || draftLinks.length),
+          },
+          {
+            title: "Pre-shoot Viewed by Brand",
+            date:
+              preShootApprovedAt ||
+              preShootViewedAt ||
+              draftSubmittedAt ||
+              fallbackTimelineDate,
+            completed: Boolean(preShootApprovedAt || preShootViewedAt || draftLinks.length),
+          },
+        ]
+      : []),
+    {
+      title: hasDeliverySubmitted ? "Delivery Submitted" : "Delivery Not Submitted",
+      date: deliverable.submittedAt || fallbackTimelineDate,
+      completed: hasDeliverySubmitted,
+    },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex min-h-screen items-stretch justify-end bg-black/20 p-3 pl-0"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <div
+        className="ml-auto flex h-full w-full max-w-[40rem] flex-col overflow-hidden rounded-[0.75rem] border border-[#E6E6E6] bg-white shadow-[0_20px_60px_rgba(0,0,0,0.18)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-[#D9D9D9] px-3 py-2.5">
+          <h2 className="text-[1.25rem] font-semibold leading-7 text-[#1A1A1A]">
+            {getDeliverableTitle(deliverable, 0)}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[1.5rem] leading-none text-[#1A1A1A]"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          <div
+            className="grid rounded-[0.75rem] border border-[#E6E6E6] p-1"
+            style={{ gridTemplateColumns: hasSubmission ? "1fr 1fr" : "1fr" }}
+          >
+            <button
+              type="button"
+              onClick={() => setActiveTab("about")}
+              className={[
+                "h-8 rounded-[0.5rem] text-[0.875rem] font-semibold",
+                activeTab === "about"
+                  ? "bg-[#F9F9F9] text-[#1A1A1A]"
+                  : "text-[#B8B8B8]",
+              ].join(" ")}
+            >
+              About Deliverable
+            </button>
+            {hasSubmission ? (
+              <button
+                type="button"
+                onClick={() => setActiveTab("submission")}
+                className={[
+                  "h-8 rounded-[0.5rem] text-[0.875rem] font-semibold",
+                  activeTab === "submission"
+                    ? "bg-[#F9F9F9] text-[#1A1A1A]"
+                    : "text-[#B8B8B8]",
+                ].join(" ")}
+              >
+                Deliverable Submission
+              </button>
+            ) : null}
+          </div>
+
+          {activeTab === "about" ? (
+            <section className="mt-5">
+              <h3 className="text-[1.125rem] font-semibold text-[#1A1A1A]">
+                About Deliverable
+              </h3>
+              <div className="mt-6 flex flex-col gap-5">
+                <DeliverableDetailRow label="Deliverable Name">
+                  {getDeliverableTitle(deliverable, 0)}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Submission Date">
+                  {formatDate(
+                    deliverable.submittedAt ||
+                      deliverable.deadline ||
+                      deliverable.dueDate,
+                  )}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Platform">
+                  {getDeliverablePlatform(deliverable) ? (
+                    <PlatformIcon
+                      platform={getDeliverablePlatform(deliverable)}
+                    />
+                  ) : (
+                    <EmptyValue />
+                  )}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Quantity">
+                  {String(getDeliverableQuantity(deliverable)).padStart(2, "0")}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Content Format">
+                  {getDeliverableFormat(deliverable) || "-"}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Milestone Payout">
+                  {formatMoney(
+                    milestone.raw.amount ||
+                      milestone.raw.milestoneBudget ||
+                      milestone.raw.budget,
+                    campaign.payout?.currency,
+                  )}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Aspect Ratio">
+                  {pickString(
+                    deliverable.aspectRatio,
+                    deliverable.dimensions,
+                    contractMeta?.aspectRatio,
+                    "-",
+                  )}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Status">
+                  <StatusBadge status={status} />
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Under Milestone">
+                  {milestone.title}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Milestone Description">
+                  {pickString(
+                    milestone.raw.milestoneDescription,
+                    milestone.raw.description,
+                    "-",
+                  )}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Additional Notes">
+                  {submissionNotes || "-"}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Grace Period">
+                  {toNumber(milestone.raw.graceDays) > 0 ? "YES" : "-"}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Revision Type">
+                  {revisionType}
+                </DeliverableDetailRow>
+                <DeliverableDetailRow label="Revision Payout">
+                  {revisionPayout}
+                </DeliverableDetailRow>
+              </div>
+            </section>
+          ) : null}
+
+          {activeTab === "submission" && hasSubmission ? (
+            <section className="mt-4">
+              <h3 className="text-[0.9375rem] font-semibold leading-5 text-[#1A1A1A]">
+                Deliverable Submission
+              </h3>
+
+              <div className="mt-6 flex flex-col gap-5">
+                <DeliverableDetailRow label="Deliverable Name">
+                  {getDeliverableTitle(deliverable, 0)}
+                </DeliverableDetailRow>
+
+                {draftLinks.length ? (
+                  <DeliverableDetailRow label="Pre-shoot Script">
+                    <SubmissionOpenLink links={draftLinks} />
+                  </DeliverableDetailRow>
+                ) : null}
+
+                <DeliverableDetailRow label="Submission Link">
+                  <SubmissionOpenLink links={submittedLinks} />
+                </DeliverableDetailRow>
+
+                <DeliverableDetailRow label="Additional Notes">
+                  {submissionNotes || "-"}
+                </DeliverableDetailRow>
+
+                <DeliverableDetailRow label="Status">
+                  <SubmissionStatusBadge status={status} />
+                </DeliverableDetailRow>
+              </div>
+
+              <div className="mt-9">
+                <h4 className="text-[0.9375rem] font-semibold leading-5 text-[#1A1A1A]">
+                  Timeline
+                </h4>
+
+                <div className="mt-5 flex flex-col">
+                  {timelineItems.map((item, index) => (
+                    <SubmissionTimelineItem
+                      key={`${item.title}-${index}`}
+                      title={item.title}
+                      date={item.date}
+                      completed={item.completed}
+                      isLast={index === timelineItems.length - 1}
+                    />
+                  ))}
+                </div>
+              </div>
+            </section>
+          ) : null}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 border-t border-[#E6E6E6] px-3 py-3">
+          {/* <button
+            type="button"
+            className="h-10 rounded-[0.75rem] border border-[#E6E6E6] px-5 text-[0.9375rem] font-semibold text-[#1A1A1A]"
+          >
+            Get help
+          </button> */}
+          <button
+            type="button"
+            onClick={() => onSubmitDeliverable(milestone, deliverable, "final")}
+            className="h-10 rounded-[0.75rem] bg-[#1A1A1A] px-5 text-[0.9375rem] font-semibold text-white"
+          >
+            {hasSubmission ? "Update Deliverable" : "Submit Deliverable"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DeliverableNestedTable({
+  campaign,
+  milestone,
   deliverables,
-  onAction,
+  onSubmitDeliverable,
+  onViewDeliverable,
   anchorId,
 }: {
+  campaign: CampaignData;
+  milestone: NormalizedMilestone;
   deliverables: CampaignDeliverable[];
-  onAction: (message: string) => void;
+  onSubmitDeliverable: (
+    milestone: NormalizedMilestone,
+    deliverable: CampaignDeliverable,
+    mode: SubmissionMode,
+  ) => void;
+  onViewDeliverable: (
+    milestone: NormalizedMilestone,
+    deliverable: CampaignDeliverable,
+    initialTab?: "about" | "submission",
+  ) => void;
   anchorId?: string;
 }) {
   return (
@@ -1590,54 +2774,85 @@ function DeliverableNestedTable({
             <tbody className="divide-y divide-[#E6E6E6] text-[0.875rem] text-[#1A1A1A]">
               {deliverables.length ? (
                 deliverables.map((item, index) => {
-                  const status = pickString(item.status, "In Progress");
-                  const actionLabel = status.toLowerCase().includes("submitted")
+                  const status = pickString(item.status, "pending");
+                  const hasSubmission = hasSubmittedDeliverable(item);
+                  const actionLabel = hasSubmission
                     ? "Update Deliverable"
                     : "Submit Deliverable";
+                  const showDraft = shouldShowAddDraft(
+                    campaign,
+                    milestone,
+                    item,
+                  );
 
                   return (
                     <tr key={getDeliverableId(item, index)}>
-                      <td className="w-10 px-4 py-4 font-semibold">{index + 1}.</td>
-                      <td className="px-4 py-4 font-semibold">
-                        {pickString(item.title, item.name, `Deliverable ${index + 1}`)}
+                      <td className="w-10 px-3.5 py-3.5 font-semibold">
+                        {index + 1}.
                       </td>
-                      <td className="px-4 py-4 font-semibold">
-                        {pickString(item.contentFormat, item.format, "Reel (video)")}
+                      <td className="px-3.5 py-3.5 font-semibold">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onViewDeliverable(milestone, item, "about")
+                          }
+                          className="text-left font-semibold underline-offset-4 hover:underline"
+                        >
+                          {getDeliverableTitle(item, index)}
+                        </button>
                       </td>
-                      <td className="px-4 py-4 font-semibold">
-                        {pickString(item.dimensions, item.sizeLabel, "1080 × 1080")}
+                      <td className="px-3.5 py-3.5 font-semibold">
+                        {getDeliverableFormat(item) || "-"}
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="px-3.5 py-3.5 font-semibold">
+                        {pickString(
+                          item.dimensions,
+                          item.aspectRatio,
+                          item.sizeLabel,
+                          "-",
+                        )}
+                      </td>
+                      <td className="px-3.5 py-3.5">
                         <div className="flex justify-center">
-                          <PlatformIcon platform={pickString(item.platform, "Instagram")} />
+                          {getDeliverablePlatform(item) ? (
+                            <PlatformIcon
+                              platform={getDeliverablePlatform(item)}
+                            />
+                          ) : (
+                            <EmptyValue />
+                          )}
                         </div>
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="px-3.5 py-3.5">
                         <StatusBadge status={status} />
                       </td>
-                      <td className="px-4 py-4 font-semibold">
+                      <td className="px-3.5 py-3.5 font-semibold">
                         {compactNumber(item.quantity || 1)}
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="px-3.5 py-3.5">
                         <div className="flex items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={() =>
-                              onAction(`${actionLabel}: ${pickString(item.title, item.name, `Deliverable ${index + 1}`)}`)
+                              onSubmitDeliverable(milestone, item, "final")
                             }
                             className="h-10 whitespace-nowrap rounded-[0.5rem] border border-[#E6E6E6] bg-white px-4 text-[0.75rem] font-semibold text-[#1A1A1A] transition hover:bg-[#F9F9F9]"
                           >
                             {actionLabel}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onAction(`Add Draft: ${pickString(item.title, item.name, `Deliverable ${index + 1}`)}`)
-                            }
-                            className="h-10 whitespace-nowrap rounded-[0.5rem] border border-[#E6E6E6] bg-white px-4 text-[0.75rem] font-semibold text-[#1A1A1A] transition hover:bg-[#F9F9F9]"
-                          >
-                            Add Draft
-                          </button>
+                          {showDraft ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onSubmitDeliverable(milestone, item, "draft")
+                              }
+                              className="h-10 whitespace-nowrap rounded-[0.5rem] border border-[#E6E6E6] bg-white px-4 text-[0.75rem] font-semibold text-[#1A1A1A] transition hover:bg-[#F9F9F9]"
+                            >
+                              {getDraftLinks(item).length
+                                ? "Update Draft"
+                                : "Add Draft"}
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -1645,7 +2860,10 @@ function DeliverableNestedTable({
                 })
               ) : (
                 <tr>
-                  <td className="px-4 py-8 text-center text-[#B8B8B8]" colSpan={8}>
+                  <td
+                    className="px-4 py-8 text-center text-[#B8B8B8]"
+                    colSpan={8}
+                  >
                     No deliverables found for this milestone.
                   </td>
                 </tr>
@@ -1660,17 +2878,24 @@ function DeliverableNestedTable({
 
 function MilestonePageContent({
   campaign,
+  influencerId,
   onAction,
+  onReload,
 }: {
   campaign: CampaignData;
+  influencerId: string;
   onAction: (message: string) => void;
+  onReload: () => void;
 }) {
   const rows = useMemo(() => getNormalizedMilestones(campaign), [campaign]);
   const [openMilestoneId, setOpenMilestoneId] = useState("");
+  const [submitState, setSubmitState] = useState<SubmitDeliverableState>(null);
+  const [viewState, setViewState] = useState<ViewDeliverableState>(null);
+  const [submittingMilestoneId, setSubmittingMilestoneId] = useState("");
 
   useEffect(() => {
     if (!rows.length) return;
-    setOpenMilestoneId((current) => current || rows[1]?.id || rows[0].id);
+    setOpenMilestoneId((current) => current || rows[0].id);
   }, [rows]);
 
   useEffect(() => {
@@ -1694,6 +2919,54 @@ function MilestonePageContent({
     };
   }, [openMilestoneId, rows.length]);
 
+  const openSubmitDeliverable = (
+    milestone: NormalizedMilestone,
+    deliverable: CampaignDeliverable,
+    mode: SubmissionMode,
+  ) => {
+    setViewState(null);
+    setSubmitState({ milestone, deliverable, mode });
+  };
+
+  const openViewDeliverable = (
+    milestone: NormalizedMilestone,
+    deliverable: CampaignDeliverable,
+    initialTab: "about" | "submission" = "about",
+  ) => {
+    setSubmitState(null);
+    setViewState({ milestone, deliverable, initialTab });
+  };
+
+  const handleSubmitMilestone = async (row: NormalizedMilestone) => {
+    if (!row.allDeliverablesSubmitted || submittingMilestoneId) return;
+
+    setSubmittingMilestoneId(row.id);
+
+    try {
+      await api.post("/milestone/submitMilestone", {
+        influencerId,
+        milestoneId: pickString(row.raw.milestoneId, row.raw.parentMilestoneId),
+        milestoneHistoryId: pickString(
+          row.raw.milestoneHistoryId,
+          row.raw._id,
+          row.id,
+        ),
+      });
+
+      onAction("Milestone submitted successfully.");
+      onReload();
+    } catch (error: any) {
+      onAction(
+        error?.response?.data?.message ||
+          error?.response?.data?.error ||
+          error?.message ||
+          "Unable to submit milestone.",
+      );
+    } finally {
+      setSubmittingMilestoneId("");
+    }
+  };
+
   return (
     <main className="pt-6">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1702,7 +2975,8 @@ function MilestonePageContent({
             Milestone & Deliverables
           </h2>
           <p className="mt-2 text-[0.875rem] leading-5 text-[#B8B8B8]">
-            Track your progress, complete deliverables, and stay on schedule throughout the campaign.
+            Track your progress, complete deliverables, and stay on schedule
+            throughout the campaign.
           </p>
         </div>
 
@@ -1722,8 +2996,17 @@ function MilestonePageContent({
           </div>
 
           <div className="mt-5 flex flex-col gap-4">
+            {rows.length === 0 ? (
+              <Card className="p-8 text-center text-[0.875rem] text-[#B8B8B8]">
+                No milestones found from API for this campaign.
+              </Card>
+            ) : null}
+
             {rows.map((row) => {
               const isOpen = row.id === openMilestoneId;
+              const canSubmitMilestone = row.allDeliverablesSubmitted;
+              const isSubmittingThisMilestone =
+                submittingMilestoneId === row.id;
 
               return (
                 <Card key={row.id} className="overflow-hidden">
@@ -1733,26 +3016,46 @@ function MilestonePageContent({
                       {row.content}
                     </div>
                     <div>
-                      <PlatformIcon platform={row.platform} />
+                      {row.platform ? (
+                        <PlatformIcon platform={row.platform} />
+                      ) : (
+                        <EmptyValue />
+                      )}
                     </div>
                     <div>
                       <StatusBadge status={row.status} />
                     </div>
-                    <div className="font-semibold">{row.quantity}</div>
+                    <div className="font-semibold">
+                      {row.totalDeliverables
+                        ? `${row.completedDeliverables}/${row.totalDeliverables}`
+                        : row.quantity}
+                    </div>
                     <div className="font-semibold">{row.deadline}</div>
                     <div className="flex items-center justify-end gap-3">
                       <button
                         type="button"
-                        onClick={() => onAction(`Submit Milestone: ${row.title}`)}
-                        className="h-9 whitespace-nowrap rounded-[0.5rem] bg-[#1A1A1A] px-4 text-[0.75rem] font-semibold text-white transition hover:bg-black/90"
+                        onClick={() => handleSubmitMilestone(row)}
+                        disabled={
+                          !canSubmitMilestone || isSubmittingThisMilestone
+                        }
+                        title={
+                          !canSubmitMilestone
+                            ? "Submit all deliverables under this milestone first."
+                            : undefined
+                        }
+                        className="h-9 whitespace-nowrap rounded-[0.5rem] bg-[#1A1A1A] px-4 text-[0.75rem] font-semibold text-white transition hover:bg-black/90 disabled:cursor-not-allowed disabled:bg-[#F2F2F2] disabled:text-[#B8B8B8]"
                       >
-                        Submit Milestone
+                        {isSubmittingThisMilestone
+                          ? "Submitting..."
+                          : "Submit Milestone"}
                       </button>
                       <button
                         type="button"
                         onClick={() => setOpenMilestoneId(isOpen ? "" : row.id)}
                         className="flex h-8 w-8 items-center justify-center rounded-[0.5rem] transition hover:bg-[#F9F9F9]"
-                        aria-label={isOpen ? "Hide deliverables" : "Show deliverables"}
+                        aria-label={
+                          isOpen ? "Hide deliverables" : "Show deliverables"
+                        }
                       >
                         <CaretDown
                           weight="bold"
@@ -1767,8 +3070,11 @@ function MilestonePageContent({
 
                   {isOpen ? (
                     <DeliverableNestedTable
+                      campaign={campaign}
+                      milestone={row}
                       deliverables={row.deliverables}
-                      onAction={onAction}
+                      onSubmitDeliverable={openSubmitDeliverable}
+                      onViewDeliverable={openViewDeliverable}
                       anchorId="deliverables"
                     />
                   ) : null}
@@ -1779,7 +3085,7 @@ function MilestonePageContent({
         </div>
       </div>
 
-      <section id="revision-history" className="mt-7 scroll-mt-24">
+      <section id="revision-history" className="mt-5 scroll-mt-24">
         <h2 className="text-[1.25rem] font-semibold leading-7 text-[#1A1A1A]">
           Revision History
         </h2>
@@ -1792,13 +3098,13 @@ function MilestonePageContent({
             <table className="w-full min-w-[54rem] text-left">
               <thead className="border-b border-[#E6E6E6] text-[0.75rem] font-semibold text-[#1A1A1A]">
                 <tr>
-                  <th className="px-4 py-4">Name</th>
-                  <th className="px-4 py-4">Under delivery</th>
-                  <th className="px-4 py-4">Submitted on</th>
-                  <th className="px-4 py-4">Link</th>
-                  <th className="px-4 py-4">Status</th>
-                  <th className="px-4 py-4">Notes</th>
-                  <th className="px-4 py-4">Actions</th>
+                  <th className="px-3.5 py-3.5">Name</th>
+                  <th className="px-3.5 py-3.5">Under delivery</th>
+                  <th className="px-3.5 py-3.5">Submitted on</th>
+                  <th className="px-3.5 py-3.5">Link</th>
+                  <th className="px-3.5 py-3.5">Status</th>
+                  <th className="px-3.5 py-3.5">Notes</th>
+                  <th className="px-3.5 py-3.5">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1823,6 +3129,24 @@ function MilestonePageContent({
           </div>
         </Card>
       </section>
+
+      <SubmitDeliverableModal
+        state={submitState}
+        influencerId={influencerId}
+        onClose={() => setSubmitState(null)}
+        onSubmitted={(message) => {
+          onAction(message);
+          onReload();
+        }}
+      />
+
+      <DeliverableViewModal
+        state={viewState}
+        campaign={campaign}
+        onClose={() => setViewState(null)}
+        onSubmitDeliverable={openSubmitDeliverable}
+      />
+
       <div className="mt-16 text-center text-[0.875rem] leading-5 text-[#B8B8B8]">
         You have reached the end of the page
       </div>
@@ -1873,11 +3197,11 @@ function ContractSection({
   const file = getContractFile(campaign);
   const fileUrl = normalizeAssetUrl(file?.url);
   const fileName = pickString(file?.name, "BrandxInfluencer_contract.pdf");
-  const fileSize = formatFileSize(file?.size) || "10.5 MB";
+  const fileSize = formatFileSize(file?.size);
   const details = getContractDetails(campaign, influencer);
 
   return (
-    <section className="mt-7">
+    <section className="mt-5">
       <h2 className="text-[1.25rem] font-semibold leading-7 text-[#1A1A1A]">
         Contract
       </h2>
@@ -1887,10 +3211,19 @@ function ContractSection({
           <div className="p-5 lg:border-r lg:border-[#E6E6E6]">
             <div className="grid gap-4">
               {details.map((detail) => (
-                <div key={detail.label} className="grid grid-cols-[9rem_minmax(0,1fr)] gap-4 text-[0.875rem] leading-5">
-                  <div className="font-medium text-[#969696]">{detail.label}</div>
+                <div
+                  key={detail.label}
+                  className="grid grid-cols-[9rem_minmax(0,1fr)] gap-4 text-[0.875rem] leading-5"
+                >
+                  <div className="font-medium text-[#969696]">
+                    {detail.label}
+                  </div>
                   <div className="font-semibold text-[#1A1A1A]">
-                    {detail.badge ? <StatusBadge status={detail.value} /> : detail.value}
+                    {detail.badge ? (
+                      <StatusBadge status={detail.value} />
+                    ) : (
+                      detail.value
+                    )}
                   </div>
                 </div>
               ))}
@@ -1899,7 +3232,10 @@ function ContractSection({
 
           <div className="flex min-h-[20rem] flex-col p-5">
             <div className="flex min-w-0 items-start gap-3">
-              <FilePdf weight="fill" className="h-8 w-8 shrink-0 text-[#F04438]" />
+              <FilePdf
+                weight="fill"
+                className="h-8 w-8 shrink-0 text-[#F04438]"
+              />
               <div className="min-w-0">
                 <div className="truncate text-[1rem] font-medium leading-6 text-[#1A1A1A]">
                   {fileName}
@@ -1964,7 +3300,7 @@ function PaymentHistorySection({
   const rows = getPaymentHistory(campaign);
 
   return (
-    <section className="mt-7">
+    <section className="mt-5">
       <h2 className="text-[1.25rem] font-semibold leading-7 text-[#1A1A1A]">
         Payment History
       </h2>
@@ -1972,7 +3308,10 @@ function PaymentHistorySection({
       <div className="mt-5 flex flex-col gap-4">
         {rows.length ? (
           rows.map((row) => (
-            <Card key={row.id} className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <Card
+              key={row.id}
+              className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between"
+            >
               <div className="flex min-w-0 items-center gap-4">
                 <span
                   className={[
@@ -2027,7 +3366,9 @@ function PaymentHistorySection({
                 ) : (
                   <button
                     type="button"
-                    onClick={() => onAction(`Receipt not available for ${row.txnId}`)}
+                    onClick={() =>
+                      onAction(`Receipt not available for ${row.txnId}`)
+                    }
                     className="inline-flex h-9 items-center gap-2 rounded-[0.5rem] bg-[#1A1A1A] px-4 text-[0.75rem] font-semibold text-white transition hover:bg-black/90"
                   >
                     <DownloadSimple weight="bold" className="h-4 w-4" />
@@ -2068,8 +3409,14 @@ function PaymentPageContent({
     toNumber(campaign.payout?.upcoming) ||
     paymentRows
       .filter((item) => !item.status.toLowerCase().includes("paid"))
-      .reduce((sum, item) => sum + toNumber(item.raw.amount || item.raw.budget), 0) ||
-    totalPayout;
+      .reduce(
+        (sum, item) =>
+          sum +
+          toNumber(
+            item.raw.amount || item.raw.milestoneBudget || item.raw.budget,
+          ),
+        0,
+      );
 
   return (
     <main className="pt-6">
@@ -2079,7 +3426,8 @@ function PaymentPageContent({
             Payment
           </h2>
           <p className="mt-2 text-[0.875rem] leading-5 text-[#B8B8B8]">
-            Track your payouts, complete deliverables, and stay on schedule throughout the campaign.
+            Track your payouts, complete deliverables, and stay on schedule
+            throughout the campaign.
           </p>
         </div>
 
@@ -2100,7 +3448,7 @@ function PaymentPageContent({
         <PaymentStatCard
           icon={<Wallet weight="bold" className="h-6 w-6" />}
           label="Payment Type"
-          value={pickString(campaign.paymentType, "Milestone")}
+          value={pickString(campaign.paymentType, "-")}
         />
         <PaymentStatCard
           icon={<CalendarDots weight="bold" className="h-6 w-6" />}
@@ -2114,14 +3462,15 @@ function PaymentPageContent({
         />
       </div>
 
-      <section className="mt-7">
+      <section className="mt-5">
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-[1.25rem] font-semibold leading-7 text-[#1A1A1A]">
               All Milestone
             </h2>
             <p className="mt-2 text-[0.875rem] leading-5 text-[#B8B8B8]">
-              Track your payouts, complete deliverables, and stay on schedule throughout the campaign.
+              Track your payouts, complete deliverables, and stay on schedule
+              throughout the campaign.
             </p>
           </div>
           <ToolbarFilter />
@@ -2140,8 +3489,17 @@ function PaymentPageContent({
             </div>
 
             <div className="mt-5 flex flex-col gap-4">
+              {paymentRows.length === 0 ? (
+                <Card className="p-8 text-center text-[0.875rem] text-[#B8B8B8]">
+                  No milestone payment rows found from API for this campaign.
+                </Card>
+              ) : null}
+
               {paymentRows.map((row) => (
-                <Card key={row.id} className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1.2fr_1fr_0.3fr] items-center px-4 py-6 text-[0.875rem] font-semibold leading-5 text-[#1A1A1A]">
+                <Card
+                  key={row.id}
+                  className="grid grid-cols-[1.2fr_1fr_1fr_1fr_1.2fr_1fr_0.3fr] items-center px-4 py-6 text-[0.875rem] font-semibold leading-5 text-[#1A1A1A]"
+                >
                   <div>{row.title}</div>
                   <div>
                     <StatusBadge status={row.status} />
@@ -2173,7 +3531,11 @@ function PaymentPageContent({
         </div>
       </section>
 
-      <ContractSection campaign={campaign} influencer={influencer} onAction={onAction} />
+      <ContractSection
+        campaign={campaign}
+        influencer={influencer}
+        onAction={onAction}
+      />
       <PaymentHistorySection campaign={campaign} onAction={onAction} />
 
       <div className="mt-16 text-center text-[0.875rem] leading-5 text-[#B8B8B8]">
@@ -2281,11 +3643,21 @@ function ImagePreviewModal({
   );
 }
 
-function ActionNotice({ message, onClose }: { message: string; onClose: () => void }) {
+function ActionNotice({
+  message,
+  onClose,
+}: {
+  message: string;
+  onClose: () => void;
+}) {
   if (!message) return null;
 
   return (
-    <div className="mt-4 flex items-center justify-between gap-4 rounded-[0.75rem] border border-[#E6E6E6] bg-[#F9F9F9] px-4 py-3" role="status" aria-live="polite">
+    <div
+      className="mt-4 flex items-center justify-between gap-4 rounded-[0.75rem] border border-[#E6E6E6] bg-[#F9F9F9] px-4 py-3"
+      role="status"
+      aria-live="polite"
+    >
       <div className="text-[0.875rem] font-medium leading-5 text-[#1A1A1A]">
         {message}
       </div>
@@ -2300,7 +3672,11 @@ function ActionNotice({ message, onClose }: { message: string; onClose: () => vo
   );
 }
 
-export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveTab }) {
+export default function CampaignDetailClient({
+  activeTab,
+}: {
+  activeTab: ActiveTab;
+}) {
   const router = useRouter();
   const params = useParams();
   const pathname = usePathname();
@@ -2310,12 +3686,12 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
   const titleFromQuery = pickString(searchParams.get("title"));
   const campaignId = useMemo(
     () => normalizeMongoId(idFromQuery ?? (params as any)?.campaignId),
-    [idFromQuery, params]
+    [idFromQuery, params],
   );
 
   const campaignBasePath = useMemo(
     () => pathname.replace(/\/(milestone-and-deliverables|payment)\/?$/, ""),
-    [pathname]
+    [pathname],
   );
 
   const [loading, setLoading] = useState(true);
@@ -2325,6 +3701,7 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
   const [token, setToken] = useState("");
   const [isOpeningThread, setIsOpeningThread] = useState(false);
   const [actionNotice, setActionNotice] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const id =
@@ -2334,7 +3711,9 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
       "";
 
     const savedToken =
-      localStorage.getItem("token") || localStorage.getItem("accessToken") || "";
+      localStorage.getItem("token") ||
+      localStorage.getItem("accessToken") ||
+      "";
 
     setInfluencerId(id);
     setToken(savedToken);
@@ -2358,15 +3737,41 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
         const res: any = await apiGetfetchCampaignbyId(
           influencerId,
           campaignId,
-          token || undefined
+          token || undefined,
         );
 
         const payload = res?.data?.data ?? res?.data ?? res;
+        const brand = payload?.brand ?? {};
+        const influencer = payload?.influencer ?? {};
+        const campaign = payload?.campaign ?? {};
+
+        const resolvedCampaignId = pickString(
+          campaign.campaignId,
+          campaign._id,
+          campaignId,
+        );
+        const resolvedBrandId = pickString(
+          brand.brandId,
+          brand._id,
+          campaign.brandId,
+        );
+
+        let apiMilestones: CampaignMilestone[] = [];
+
+        try {
+          apiMilestones = await fetchMilestonesFromApi({
+            influencerId,
+            campaignId: resolvedCampaignId,
+            brandId: resolvedBrandId,
+          });
+        } catch (milestoneError) {
+          console.error("Failed to fetch milestone API rows:", milestoneError);
+        }
 
         const nextData: CampaignViewData = {
-          brand: payload?.brand ?? {},
-          influencer: payload?.influencer ?? {},
-          campaign: payload?.campaign ?? {},
+          brand,
+          influencer,
+          campaign: mergeCampaignWithApiMilestones(campaign, apiMilestones),
         };
 
         if (!cancelled) {
@@ -2388,7 +3793,7 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
     return () => {
       cancelled = true;
     };
-  }, [influencerId, campaignId, token]);
+  }, [influencerId, campaignId, token, reloadKey]);
 
   useEffect(() => {
     if (!viewData || titleFromQuery) return;
@@ -2412,12 +3817,14 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
   };
 
   const goToMilestoneSection = (
-    sectionId: "revision-history" | "deliverables"
+    sectionId: "revision-history" | "deliverables",
   ) => {
     const query = searchParams.toString();
     const querySuffix = query ? `?${query}` : "";
 
-    router.push(`${campaignBasePath}/milestone-and-deliverables${querySuffix}#${sectionId}`);
+    router.push(
+      `${campaignBasePath}/milestone-and-deliverables${querySuffix}#${sectionId}`,
+    );
   };
 
   if (loading) {
@@ -2496,7 +3903,9 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
       await navigator.clipboard.writeText(window.location.href);
       notifyAction("Campaign link copied");
     } catch {
-      notifyAction("Unable to copy link. Please copy it manually from the browser.");
+      notifyAction(
+        "Unable to copy link. Please copy it manually from the browser.",
+      );
     }
   };
 
@@ -2510,7 +3919,7 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
       response?.data?.id,
       response?.threadId,
       response?._id,
-      response?.id
+      response?.id,
     );
   };
 
@@ -2521,12 +3930,18 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
     const currentInfluencerId = pickString(
       influencer.influencerId,
       influencer._id,
-      influencerId
+      influencerId,
     );
-    const currentCampaignId = pickString(campaign.campaignId, campaign._id, campaignId);
+    const currentCampaignId = pickString(
+      campaign.campaignId,
+      campaign._id,
+      campaignId,
+    );
 
     if (!brandId || !currentInfluencerId || !currentCampaignId) {
-      notifyAction("Unable to open inbox. Missing brand, influencer, or campaign details.");
+      notifyAction(
+        "Unable to open inbox. Missing brand, influencer, or campaign details.",
+      );
       return;
     }
 
@@ -2543,7 +3958,8 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
       });
 
       const threadId = getThreadIdFromResponse(response);
-      if (!threadId) throw new Error("Thread created, but threadId was not returned.");
+      if (!threadId)
+        throw new Error("Thread created, but threadId was not returned.");
 
       router.push(`/influencer/inbox/${threadId}`);
     } catch (error: any) {
@@ -2551,7 +3967,7 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
         error?.response?.data?.error ||
           error?.response?.data?.message ||
           error?.message ||
-          "Failed to open brand conversation."
+          "Failed to open brand conversation.",
       );
     } finally {
       setIsOpeningThread(false);
@@ -2569,7 +3985,10 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
           isOpeningThread={isOpeningThread}
         />
         <CampaignTabs activeTab={activeTab} />
-        <ActionNotice message={actionNotice} onClose={() => setActionNotice("")} />
+        <ActionNotice
+          message={actionNotice}
+          onClose={() => setActionNotice("")}
+        />
 
         {activeTab === "overview" ? (
           <OverviewPageContent
@@ -2578,7 +3997,12 @@ export default function CampaignDetailClient({ activeTab }: { activeTab: ActiveT
           />
         ) : null}
         {activeTab === "milestones" ? (
-          <MilestonePageContent campaign={campaignWithQueryTitle} onAction={notifyAction} />
+          <MilestonePageContent
+            campaign={campaignWithQueryTitle}
+            influencerId={influencerId}
+            onAction={notifyAction}
+            onReload={() => setReloadKey((value) => value + 1)}
+          />
         ) : null}
         {activeTab === "payment" ? (
           <PaymentPageContent

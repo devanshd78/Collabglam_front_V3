@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import MyCampaignNavbarGate from "./myCampaignNavGate";
-import SidebarCampaign from "./sidebarCampaign"
+import SidebarCampaign from "./sidebarCampaign";
 import CampaignCard from "@/components/ui/influencer/card";
 import MyCampaignCard from "@/components/ui/influencer/myCamapignCard";
 import CampaignFilter, {
@@ -41,6 +41,29 @@ type CampaignImage = {
   imageUrl?: string;
 };
 
+type MilestoneDeliverableSummary = {
+  id: string;
+  name: string;
+  status: string;
+  quantity: number;
+  platforms: string[];
+  deliveries: string[];
+  submittedAt?: string;
+};
+
+type CampaignMilestoneSummary = {
+  id: string;
+  title: string;
+  status: string;
+  amount: number;
+  startDate: string;
+  endDate: string;
+  deliverables: MilestoneDeliverableSummary[];
+  released: boolean;
+  payoutStatus: string;
+  isAccepted: number;
+};
+
 type CampaignData = {
   id: string;
   title: string;
@@ -70,6 +93,13 @@ type CampaignData = {
   milestoneCurrent: number;
   milestoneTotal: number;
   currentMilestoneName: string;
+  currentMilestoneStatus: string;
+  currentMilestoneAmount: number;
+  deliverableCurrent: number;
+  deliverableTotal: number;
+  pendingDeliverables: number;
+  currentDeliverableName: string;
+  milestones: CampaignMilestoneSummary[];
   campaignGoalValues: string[];
   targetAgeGroupValues: string[];
   targetCountryValues: string[];
@@ -466,45 +496,279 @@ function getPlatformValues(campaign: any) {
   );
 }
 
-function getMilestoneStats(source: any) {
+function normalizeStringArray(value: any) {
+  return asArray(value)
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+}
+
+function normalizeMilestoneStatus(item: any) {
+  const payoutStatus = String(item?.payoutStatus || "").trim().toLowerCase();
+  const rawStatus = String(item?.status || item?.milestoneStatus || "")
+    .trim()
+    .toLowerCase();
+
+  if (payoutStatus === "paid") return "paid";
+  if (payoutStatus === "initiated") return "released";
+  if (item?.released === true) return "released";
+  if (Number(item?.isAccepted || 0) === 1) return "accepted";
+  if (rawStatus) return rawStatus;
+
+  return "pending";
+}
+
+function isDoneStatus(status: string) {
+  const normalized = String(status || "").trim().toLowerCase();
+
+  return [
+    "accepted",
+    "approved",
+    "completed",
+    "done",
+    "released",
+    "paid",
+  ].includes(normalized);
+}
+
+function normalizeDeliverableStatus(item: any) {
+  const status = String(item?.status || item?.deliverableStatus || "")
+    .trim()
+    .toLowerCase();
+
+  if (status) return status;
+  if (item?.approvedAt || item?.approvedRole || item?.approvalId) return "approved";
+  if (item?.submittedAt || item?.deliverableLink || item?.deliverableLinks?.length) {
+    return "submitted";
+  }
+
+  return "pending";
+}
+
+function normalizeDeliverableRows(rows: any[] = []): MilestoneDeliverableSummary[] {
+  return asArray(rows)
+    .map((item, index) => {
+      const name = getFirstString(
+        item?.deliverableName,
+        item?.name,
+        item?.title,
+        item?.deliverableTitle,
+        item?.deliverableFormat,
+        `Deliverable ${index + 1}`
+      );
+
+      const quantity = Number(item?.quantity || item?.qty || item?.count || 1);
+
+      return {
+        id: getFirstString(item?._id, item?.deliverableId, item?.id, `deliverable-${index + 1}`),
+        name,
+        status: normalizeDeliverableStatus(item),
+        quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+        platforms: normalizeStringArray(
+          item?.platforms || item?.platform || item?.contentPlatforms
+        ),
+        deliveries: normalizeStringArray(
+          item?.deliveries ||
+            item?.delivery ||
+            item?.deliveryTypes ||
+            item?.contentFormats ||
+            item?.deliverableFormat
+        ),
+        submittedAt: getFirstString(item?.submittedAt, item?.createdAt),
+      };
+    })
+    .filter((item) => item.name);
+}
+
+function collectMilestoneRows(source: any) {
   const campaignDoc = source?.campaign || source?.campaignData || source || {};
 
-  const milestones = Array.isArray(campaignDoc?.milestones)
-    ? campaignDoc.milestones
-    : Array.isArray(source?.milestones)
-      ? source.milestones
-      : [];
+  const candidates = [
+    source?.milestoneHistory,
+    source?.milestones,
+    source?.milestone?.milestoneHistory,
+    source?.milestoneData,
+    source?.contract?.milestones,
+    source?.contract?.content?.scheduleA?.commercial?.milestones,
+    source?.content?.scheduleA?.commercial?.milestones,
+    campaignDoc?.milestoneHistory,
+    campaignDoc?.milestones,
+  ];
+
+  const rows: any[] = [];
+
+  const pushRows = (value: any) => {
+    if (!value) return;
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (Array.isArray(item?.milestoneHistory)) {
+          item.milestoneHistory.forEach((historyItem: any) => rows.push(historyItem));
+        } else {
+          rows.push(item);
+        }
+      });
+      return;
+    }
+
+    if (Array.isArray(value?.milestoneHistory)) {
+      value.milestoneHistory.forEach((item: any) => rows.push(item));
+      return;
+    }
+
+    rows.push(value);
+  };
+
+  candidates.forEach(pushRows);
+
+  const seen = new Set<string>();
+
+  return rows.filter((item, index) => {
+    if (!item || typeof item !== "object") return false;
+
+    const key = getFirstString(
+      item?._id,
+      item?.milestoneHistoryId,
+      item?.milestoneId,
+      item?.sourceMilestoneId,
+      item?.milestoneTitle,
+      item?.milestoneName,
+      `milestone-${index}`
+    );
+
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function normalizeMilestoneRows(source: any): CampaignMilestoneSummary[] {
+  return collectMilestoneRows(source).map((item, index) => {
+    const status = normalizeMilestoneStatus(item);
+
+    return {
+      id: getFirstString(
+        item?._id,
+        item?.milestoneHistoryId,
+        item?.milestoneId,
+        item?.sourceMilestoneId,
+        `milestone-${index + 1}`
+      ),
+      title: getFirstString(
+        item?.milestoneTitle,
+        item?.milestoneName,
+        item?.name,
+        item?.title,
+        `Milestone ${index + 1}`
+      ),
+      status,
+      amount: Number(
+        item?.milestoneBudget ?? item?.amount ?? item?.paymentAmount ?? item?.budget ?? 0
+      ),
+      startDate: getFirstString(item?.startDate, item?.createdAt),
+      endDate: getFirstString(item?.endDate, item?.dueDate, item?.liveDate),
+      deliverables: normalizeDeliverableRows(item?.deliverables),
+      released: item?.released === true || status === "released" || status === "paid",
+      payoutStatus: String(item?.payoutStatus || "pending"),
+      isAccepted: Number(item?.isAccepted || 0),
+    };
+  });
+}
+
+function getMilestoneStats(source: any) {
+  const campaignDoc = source?.campaign || source?.campaignData || source || {};
+  const milestones = normalizeMilestoneRows(source);
 
   const total =
     Number(campaignDoc?.totalMilestones) ||
     Number(source?.totalMilestones) ||
-    milestones.length ||
-    5;
+    milestones.length;
 
   const completed =
     Number(campaignDoc?.completedMilestones) ||
     Number(source?.completedMilestones) ||
-    milestones.filter((item: any) => {
-      const status = String(item?.status || "").toLowerCase();
-      return status === "completed" || status === "approved";
-    }).length ||
-    0;
+    milestones.filter((item) => isDoneStatus(item.status)).length;
 
   const currentMilestone =
-    milestones.find((item: any) => {
-      const status = String(item?.status || "").toLowerCase();
-      return status !== "completed" && status !== "approved";
-    }) || milestones[0];
+    milestones.find((item) => !isDoneStatus(item.status)) || milestones[0] || null;
+
+  const allDeliverables = milestones.flatMap((item) => item.deliverables || []);
+  const currentMilestoneDeliverables = currentMilestone?.deliverables || [];
+
+  const deliverableTotal = allDeliverables.reduce(
+    (sum, item) => sum + Math.max(1, Number(item.quantity || 1)),
+    0
+  );
+
+  const deliverableCurrent = allDeliverables
+    .filter((item) => isDoneStatus(item.status))
+    .reduce((sum, item) => sum + Math.max(1, Number(item.quantity || 1)), 0);
+
+  const currentDeliverable =
+    currentMilestoneDeliverables.find((item) => !isDoneStatus(item.status)) ||
+    allDeliverables.find((item) => !isDoneStatus(item.status)) ||
+    currentMilestoneDeliverables[0] ||
+    allDeliverables[0] ||
+    null;
 
   return {
     milestoneCurrent: completed,
     milestoneTotal: total,
-    currentMilestoneName:
-      currentMilestone?.name ||
-      currentMilestone?.title ||
-      currentMilestone?.milestoneName ||
-      "Milestone Name",
+    currentMilestoneName: currentMilestone?.title || "",
+    currentMilestoneStatus: currentMilestone?.status || "",
+    currentMilestoneAmount: Number(currentMilestone?.amount || 0),
+    deliverableCurrent,
+    deliverableTotal,
+    pendingDeliverables: Math.max(0, deliverableTotal - deliverableCurrent),
+    currentDeliverableName: currentDeliverable?.name || "",
+    milestones,
   };
+}
+
+function formatMoney(value: number) {
+  return Number(value || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
+function pluralLabel(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function getMilestoneFooterNote(campaign: CampaignData) {
+  const parts: string[] = [];
+
+  if (campaign.currentMilestoneName) {
+    parts.push(campaign.currentMilestoneName);
+  }
+
+  if (campaign.currentDeliverableName) {
+    parts.push(`Deliverable: ${campaign.currentDeliverableName}`);
+  }
+
+  if (campaign.deliverableTotal > 0) {
+    parts.push(
+      `${campaign.deliverableCurrent}/${campaign.deliverableTotal} deliverables done`
+    );
+  } else if (campaign.milestoneTotal > 0) {
+    parts.push(
+      `${campaign.milestoneCurrent}/${campaign.milestoneTotal} milestones done`
+    );
+  }
+
+  if (campaign.currentMilestoneAmount > 0) {
+    parts.push(`Escrow $${formatMoney(campaign.currentMilestoneAmount)}`);
+  }
+
+  if (campaign.currentMilestoneStatus) {
+    parts.push(campaign.currentMilestoneStatus.replace(/_/g, " "));
+  }
+
+  if (campaign.daysLeft > 0) {
+    parts.push(`${pluralLabel(campaign.daysLeft, "day")} left`);
+  }
+
+  return parts.join(" • ");
 }
 
 function getCardStatus(campaign: CampaignData) {
@@ -719,6 +983,13 @@ function mapApiCampaign(source: any): CampaignData {
     milestoneCurrent: milestoneStats.milestoneCurrent,
     milestoneTotal: milestoneStats.milestoneTotal,
     currentMilestoneName: milestoneStats.currentMilestoneName,
+    currentMilestoneStatus: milestoneStats.currentMilestoneStatus,
+    currentMilestoneAmount: milestoneStats.currentMilestoneAmount,
+    deliverableCurrent: milestoneStats.deliverableCurrent,
+    deliverableTotal: milestoneStats.deliverableTotal,
+    pendingDeliverables: milestoneStats.pendingDeliverables,
+    currentDeliverableName: milestoneStats.currentDeliverableName,
+    milestones: milestoneStats.milestones,
   };
 }
 
@@ -865,7 +1136,6 @@ function AppliedSidebarSkeleton() {
       </section>
 
       <div className="flex w-[0.625rem] shrink-0 items-start justify-center px-[0.0625rem] pt-[2rem]">
-        <div className="h-[4.8125rem] flex-1 rounded-[6.25rem] bg-[#E6E6E6]" />
       </div>
 
       <section className="relative min-w-0 flex-1 overflow-hidden pb-[4rem]">
@@ -972,14 +1242,19 @@ function AppliedCampaignSplitView({
           "px-[0.0625rem] pb-[0.0625rem] pt-[2rem]",
         ].join(" ")}
       >
-        <div className="h-[4.8125rem] flex-1 rounded-[var(--Sizes-Border-Radius-Pill,6.25rem)] bg-[#E6E6E6]" />
       </div>
 
-      <section className="sticky top-0 h-full min-h-0 min-w-0 flex-1 overflow-hidden pb-[4rem]">
+      <section
+        className={[
+          "sticky top-0 h-full min-h-0 min-w-0 flex-1 overflow-hidden",
+          selectedCampaign?.contractId ? "pb-0" : "pb-[4rem]",
+        ].join(" ")}
+      >
         {selectedCampaign ? (
           <div className="h-full min-h-0 overflow-hidden">
             <SidebarCampaign
               campaignId={selectedCampaign.id}
+              contractId={selectedCampaign.contractId}
               invitationId={selectedCampaign.contractId || selectedCampaign.id}
               invitationStatus="accepted"
               invitationBrandLogo={selectedCampaign.brandLogoUrl}
@@ -994,6 +1269,7 @@ function AppliedCampaignSplitView({
           </div>
         )}
 
+        {!selectedCampaign?.contractId ? (
         <div className="absolute bottom-0 left-0 right-[0.0625rem] z-30 flex h-[4rem] w-auto flex-wrap items-center content-center justify-between border-y border-l border-[#E6E6E6] bg-white px-[1.25rem] shadow-[0_24px_40px_-4px_rgba(0,0,0,0.10),0_0_12px_0_rgba(0,0,0,0.08)]">
           <button
             type="button"
@@ -1021,7 +1297,8 @@ function AppliedCampaignSplitView({
               View
             </button>
           </div>
-        </div>
+          </div>
+        ) : null}
       </section>
     </div>
   );
@@ -1365,14 +1642,7 @@ export default function MyCampaignsContent({
                         budget={campaign.budgetMax}
                         timelineStartDate={campaign.timeline.startDate}
                         timelineEndDate={campaign.timeline.endDate}
-                        footerNote={
-                          campaign.daysLeft > 0
-                            ? `${
-                                campaign.currentMilestoneName ||
-                                "Milestone Name"
-                              } submission in ${campaign.daysLeft} days`
-                            : ""
-                        }
+                        footerNote={getMilestoneFooterNote(campaign)}
                         onCardClick={() => router.push(getCampaignHref(campaign))}
                         onManageCampaign={() =>
                           router.push(getCampaignHref(campaign))

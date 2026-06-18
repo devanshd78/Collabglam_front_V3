@@ -7,9 +7,10 @@ import {
     apiConfirmBrandWalletTopup,
     apiGetBrandWallet,
 } from "../../services/brandApi";
+import { post } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
 
-type SummaryTab = "balance" | "freeze" | "transaction";
+type SummaryTab = "balance" | "escrow" | "transaction";
 type FundTab = "add" | "withdraw";
 
 type InfluencerAllocation = {
@@ -37,11 +38,58 @@ type WalletFreeze = {
     influencerAllocations?: InfluencerAllocation[];
 };
 
+type EscrowHistory = {
+    type?: string;
+    amount?: number;
+    currency?: string;
+    campaignId?: string;
+    influencerId?: string;
+    contractId?: string;
+    milestoneId?: string;
+    milestoneHistoryId?: string;
+    milestoneTitle?: string;
+    walletBalanceBefore?: number;
+    walletBalanceAfter?: number;
+    escrowBalanceBefore?: number;
+    escrowBalanceAfter?: number;
+    createdAt?: string;
+    note?: string;
+};
+
+type WalletTopup = {
+    amount?: number;
+    currency?: string;
+    status?: string;
+    source?: string;
+    stripeSessionId?: string;
+    stripePaymentIntentId?: string;
+    walletBalanceBefore?: number;
+    walletBalanceAfter?: number;
+    createdAt?: string;
+};
+
+type WithdrawHistory = {
+    amount?: number;
+    currency?: string;
+    status?: string;
+    method?: string;
+    transactionId?: string | null;
+    walletBalanceBefore?: number;
+    walletBalanceAfter?: number;
+    createdAt?: string;
+    note?: string;
+};
+
 type BrandWallet = {
     brandId: string;
     walletBalance: number;
+    escrowBalance: number;
     frozenBalance: number;
-    freezes: WalletFreeze[];
+    usableBalance: number;
+    topups: WalletTopup[];
+    escrowHistories: EscrowHistory[];
+    withdrawHistories: WithdrawHistory[];
+    freezes?: WalletFreeze[];
 };
 
 type BrandWalletResponse = {
@@ -74,7 +122,9 @@ type ConfirmBrandWalletTopupData = {
     brandId?: string;
     addedAmount?: number;
     walletBalance?: number;
+    escrowBalance?: number;
     frozenBalance?: number;
+    usableBalance?: number;
 };
 
 type ConfirmBrandWalletTopupResponse = ConfirmBrandWalletTopupData & {
@@ -85,7 +135,7 @@ type ConfirmBrandWalletTopupResponse = ConfirmBrandWalletTopupData & {
 
 const summaryTabs: { key: SummaryTab; label: string }[] = [
     { key: "balance", label: "Balance" },
-    { key: "freeze", label: "Escrow" },
+    { key: "escrow", label: "Escrow" },
     { key: "transaction", label: "Transaction" },
 ];
 
@@ -195,7 +245,7 @@ function getBrandIdFromLocalStorage() {
     return "";
 }
 
-function isBrandWallet(value: unknown): value is BrandWallet {
+function isBrandWallet(value: unknown): value is Partial<BrandWallet> {
     if (!value || typeof value !== "object") return false;
 
     const wallet = value as Partial<BrandWallet>;
@@ -203,24 +253,71 @@ function isBrandWallet(value: unknown): value is BrandWallet {
     return (
         typeof wallet.brandId === "string" &&
         typeof wallet.walletBalance === "number" &&
-        typeof wallet.frozenBalance === "number" &&
-        Array.isArray(wallet.freezes)
+        (typeof wallet.escrowBalance === "number" ||
+            typeof wallet.frozenBalance === "number")
     );
+}
+
+function normalizeWalletObject(value: Partial<BrandWallet>): BrandWallet {
+    const escrowBalance = Number(value.escrowBalance ?? value.frozenBalance ?? 0);
+    const walletBalance = Number(value.walletBalance ?? 0);
+
+    return {
+        brandId: String(value.brandId || ""),
+        walletBalance,
+        escrowBalance,
+        frozenBalance: Number(value.frozenBalance ?? escrowBalance),
+        usableBalance: Number(value.usableBalance ?? walletBalance),
+        topups: Array.isArray(value.topups) ? value.topups : [],
+        escrowHistories: Array.isArray(value.escrowHistories)
+            ? value.escrowHistories
+            : [],
+        withdrawHistories: Array.isArray(value.withdrawHistories)
+            ? value.withdrawHistories
+            : [],
+        freezes: Array.isArray(value.freezes) ? value.freezes : [],
+    };
 }
 
 function normalizeWalletResponse(response: unknown): BrandWallet | null {
     if (isBrandWallet(response)) {
-        return response;
+        return normalizeWalletObject(response);
     }
 
     if (response && typeof response === "object") {
         const obj = response as BrandWalletResponse;
 
-        if (isBrandWallet(obj.data)) return obj.data;
-        if (isBrandWallet(obj.result)) return obj.result;
+        if (isBrandWallet(obj.data)) return normalizeWalletObject(obj.data);
+        if (isBrandWallet(obj.result)) return normalizeWalletObject(obj.result);
     }
 
     return null;
+}
+
+function getEscrowTypeLabel(type?: string) {
+    const value = String(type || "").toLowerCase();
+
+    if (value.includes("refund")) return "Escrow Refund";
+    if (value.includes("release")) return "Escrow Release";
+    if (value.includes("manual")) return "Manual Escrow";
+    if (value.includes("milestone")) return "Milestone Escrow";
+
+    return "Escrow";
+}
+
+function formatDate(value?: string) {
+    if (!value) return "-";
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "-";
+
+    return new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    }).format(date);
 }
 
 function formatMoney(amount = 0) {
@@ -374,7 +471,7 @@ export default function WalletPaymentPage() {
         }
 
         if (payment === "success") {
-            if (!sessionId) {
+            if (!sessionId || sessionId === "{CHECKOUT_SESSION_ID}") {
                 showToast("Stripe session id missing after payment.", "error");
                 router.replace("/brand/wallet");
                 return;
@@ -385,10 +482,10 @@ export default function WalletPaymentPage() {
     }, [router]);
 
     const summaryData = useMemo(() => {
-        if (summaryTab === "freeze") {
+        if (summaryTab === "escrow") {
             return {
-                label: "Frozen Balance",
-                value: wallet?.frozenBalance ?? 0,
+                label: "Escrow Balance",
+                value: wallet?.escrowBalance ?? wallet?.frozenBalance ?? 0,
             };
         }
 
@@ -398,7 +495,7 @@ export default function WalletPaymentPage() {
         };
     }, [summaryTab, wallet]);
 
-    const freezeRows = wallet?.freezes ?? [];
+    const escrowRows = wallet?.escrowHistories ?? [];
     const payableAmount = Number(amountInput);
 
     function handleSummaryTabClick(tab: SummaryTab) {
@@ -455,6 +552,54 @@ export default function WalletPaymentPage() {
         } catch (err) {
             showToast(
                 err instanceof Error ? err.message : "Unable to start Stripe payment.",
+                "error"
+            );
+        } finally {
+            setIsTopupLoading(false);
+        }
+    }
+
+    async function handleWithdrawMoney() {
+        try {
+            if (!payableAmount || payableAmount <= 0) {
+                showToast("Please enter a valid amount.", "error");
+                return;
+            }
+
+            const brandId = getBrandIdFromLocalStorage();
+
+            if (!brandId) {
+                showToast("Brand ID not found in localStorage.", "error");
+                return;
+            }
+
+            if (payableAmount > Number(wallet?.walletBalance || 0)) {
+                showToast("Withdraw amount cannot be greater than wallet balance.", "error");
+                return;
+            }
+
+            setIsTopupLoading(true);
+
+            const response: any = await post("/brand-wallet/withdraw", {
+                brandId,
+                amount: payableAmount,
+                currency: "usd",
+                method: "manual",
+                note: "Brand wallet withdrawal",
+            });
+
+            const message =
+                response?.data?.message ||
+                response?.message ||
+                "Wallet withdrawal completed successfully.";
+
+            showToast(message, "success");
+            await loadWallet();
+        } catch (err: any) {
+            showToast(
+                err?.response?.data?.message ||
+                    err?.message ||
+                    "Unable to withdraw wallet amount.",
                 "error"
             );
         } finally {
@@ -596,30 +741,31 @@ export default function WalletPaymentPage() {
                         </div>
                     </div>
 
-                    <button
-                        type="button"
-                        className="mx-[0.75rem] flex min-h-[3.5rem] items-center justify-between border-y border-[#E6E6E6] px-[0.75rem] text-left"
-                    >
+                    <div className="mx-[0.75rem] flex min-h-[3.5rem] items-center justify-between border-y border-[#E6E6E6] px-[0.75rem] text-left">
                         <span>
                             <span className="block text-[0.875rem] font-semibold leading-[1.25rem] text-[#1A1A1A]">
-                                Set as Default
+                                {fundTab === "add" ? "Stripe Checkout" : "Wallet Withdrawal"}
                             </span>
                             <span className="block text-[0.75rem] font-medium leading-[1rem] text-[#B8B8B8]">
-                                Bank of America XXXX1502
+                                {fundTab === "add"
+                                    ? "Funds will be added to available wallet balance"
+                                    : "Amount will be withdrawn from available wallet balance"}
                             </span>
                         </span>
 
                         <ChevronRightIcon />
-                    </button>
+                    </div>
 
                     <button
                         type="button"
-                        onClick={fundTab === "add" ? handleAddMoney : undefined}
-                        disabled={fundTab !== "add" || isTopupLoading}
+                        onClick={fundTab === "add" ? handleAddMoney : handleWithdrawMoney}
+                        disabled={isTopupLoading}
                         className="mx-[0.75rem] mb-[0.75rem] mt-[0.75rem] flex h-[3.5rem] items-center justify-center gap-0 self-stretch rounded-[0.75rem] bg-[#1A1A1A] text-center text-[0.875rem] font-semibold leading-[1.25rem] tracking-[0] text-white shadow-[0_2px_4px_-2px_rgba(0,0,0,0.08),0_4px_8px_-2px_rgba(0,0,0,0.04)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                         {isTopupLoading
-                            ? "Redirecting to Stripe..."
+                            ? fundTab === "add"
+                                ? "Redirecting to Stripe..."
+                                : "Processing withdrawal..."
                             : fundTab === "add"
                                 ? "Add Money"
                                 : "Withdraw Money"}
@@ -630,7 +776,7 @@ export default function WalletPaymentPage() {
             <section className="mt-[1.75rem]">
                 <div className="mb-[1rem] flex items-center justify-between">
                     <h2 className="text-[1.25rem] font-semibold leading-[1.75rem] tracking-[0] text-[#1A1A1A]">
-                        Escrow Amount
+                        Escrow History
                     </h2>
                 </div>
 
@@ -640,28 +786,25 @@ export default function WalletPaymentPage() {
                             <thead>
                                 <tr className="border-b border-[#E6E6E6] bg-[#F9F9F9]">
                                     <th className="px-[1rem] py-[1rem] text-left text-[0.875rem] font-semibold leading-[1.25rem]">
-                                        Campaign ID
+                                        Type
+                                    </th>
+                                    <th className="px-[1rem] py-[1rem] text-left text-[0.875rem] font-semibold leading-[1.25rem]">
+                                        Milestone
                                     </th>
                                     <th className="px-[1rem] py-[1rem] text-left text-[0.875rem] font-semibold leading-[1.25rem]">
                                         Influencer ID
                                     </th>
                                     <th className="px-[1rem] py-[1rem] text-left text-[0.875rem] font-semibold leading-[1.25rem]">
-                                        Escrow Amount
+                                        Amount
                                     </th>
                                     <th className="px-[1rem] py-[1rem] text-left text-[0.875rem] font-semibold leading-[1.25rem]">
-                                        Current Escrow
+                                        Wallet Balance
                                     </th>
                                     <th className="px-[1rem] py-[1rem] text-left text-[0.875rem] font-semibold leading-[1.25rem]">
-                                        Allocated
+                                        Escrow Balance
                                     </th>
                                     <th className="px-[1rem] py-[1rem] text-left text-[0.875rem] font-semibold leading-[1.25rem]">
-                                        Released
-                                    </th>
-                                    <th className="px-[1rem] py-[1rem] text-left text-[0.875rem] font-semibold leading-[1.25rem]">
-                                        Available
-                                    </th>
-                                    <th className="px-[1rem] py-[1rem] text-right text-[0.875rem] font-semibold leading-[1.25rem]">
-                                        Action
+                                        Date
                                     </th>
                                 </tr>
                             </thead>
@@ -670,72 +813,54 @@ export default function WalletPaymentPage() {
                                 {isLoading ? (
                                     <tr>
                                         <td
-                                            colSpan={8}
+                                            colSpan={7}
                                             className="px-[1rem] py-[2rem] text-center text-[0.875rem] font-medium leading-[1.25rem] text-[#777]"
                                         >
-                                            Loading wallet freezes...
+                                            Loading escrow history...
                                         </td>
                                     </tr>
-                                ) : freezeRows.length ? (
-                                    freezeRows.map((freeze, index) => {
-                                        const influencerId =
-                                            freeze.influencerId ||
-                                            freeze.influencerAllocations?.[0]?.influencerId;
+                                ) : escrowRows.length ? (
+                                    escrowRows.map((entry, index) => (
+                                        <tr
+                                            key={`${entry.milestoneHistoryId || entry.createdAt || "escrow"}-${index}`}
+                                            className="border-b border-[#E6E6E6] last:border-b-0"
+                                        >
+                                            <td className="px-[1rem] py-[1rem] text-[0.875rem] font-semibold leading-[1.25rem]">
+                                                {getEscrowTypeLabel(entry.type)}
+                                            </td>
 
-                                        const freezeAmount =
-                                            freeze.freezeAmount ?? freeze.totalFrozenAmount ?? 0;
+                                            <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#777]">
+                                                {entry.milestoneTitle || shortId(entry.milestoneHistoryId) || "-"}
+                                            </td>
 
-                                        return (
-                                            <tr
-                                                key={`${freeze.campaignId}-${index}`}
-                                                className="border-b border-[#E6E6E6] last:border-b-0"
-                                            >
-                                                <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem]">
-                                                    {shortId(freeze.campaignId)}
-                                                </td>
+                                            <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#777]">
+                                                {shortId(entry.influencerId)}
+                                            </td>
 
-                                                <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#777]">
-                                                    {shortId(influencerId)}
-                                                </td>
+                                            <td className="px-[1rem] py-[1rem] text-[0.875rem] font-semibold leading-[1.25rem] text-[#1A1A1A]">
+                                                {formatMoney(entry.amount || 0)}
+                                            </td>
 
-                                                <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#777]">
-                                                    {formatMoney(freezeAmount)}
-                                                </td>
+                                            <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#777]">
+                                                {formatMoney(entry.walletBalanceBefore || 0)} → {formatMoney(entry.walletBalanceAfter || 0)}
+                                            </td>
 
-                                                <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#777]">
-                                                    {formatMoney(freeze.currentFrozenAmount ?? 0)}
-                                                </td>
+                                            <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#777]">
+                                                {formatMoney(entry.escrowBalanceBefore || 0)} → {formatMoney(entry.escrowBalanceAfter || 0)}
+                                            </td>
 
-                                                <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#777]">
-                                                    {formatMoney(freeze.totalAllocatedAmount ?? 0)}
-                                                </td>
-
-                                                <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#777]">
-                                                    {formatMoney(freeze.totalReleasedAmount ?? 0)}
-                                                </td>
-
-                                                <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#777]">
-                                                    {formatMoney(freeze.availableToAllocate ?? 0)}
-                                                </td>
-
-                                                <td className="px-[1rem] py-[1rem] text-right">
-                                                    <button
-                                                        type="button"
-                                                        className="rounded-[0.5rem] bg-[#1A1A1A] px-[1rem] py-[0.5rem] text-[0.875rem] font-semibold leading-[1.25rem] text-white"
-                                                    >
-                                                        View
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })
+                                            <td className="px-[1rem] py-[1rem] text-[0.875rem] font-medium leading-[1.25rem] text-[#777]">
+                                                {formatDate(entry.createdAt)}
+                                            </td>
+                                        </tr>
+                                    ))
                                 ) : (
                                     <tr>
                                         <td
-                                            colSpan={8}
+                                            colSpan={7}
                                             className="px-[1rem] py-[2rem] text-center text-[0.875rem] font-medium leading-[1.25rem] text-[#777]"
                                         >
-                                            No freeze amount found.
+                                            No escrow history found.
                                         </td>
                                     </tr>
                                 )}

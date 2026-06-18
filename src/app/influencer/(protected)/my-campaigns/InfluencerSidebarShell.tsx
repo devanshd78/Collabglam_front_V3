@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { HiX } from "react-icons/hi";
+import { useSidebarOffset } from "../../sidebarContext";
 
 type InfluencerSidebarShellProps = {
   isOpen: boolean;
@@ -22,8 +24,36 @@ const PDF_ZOOM_STEP = 10;
 const PDF_DEFAULT_ZOOM = 85;
 
 function safeOffset(value: number | undefined) {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.round(Number(value)));
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue)) return 0;
+
+  return Math.max(0, Math.round(numberValue));
+}
+
+function getSidebarElement() {
+  if (typeof document === "undefined") return null;
+
+  return (
+    document.querySelector<HTMLElement>("#cg-sidebar") ||
+    document.querySelector<HTMLElement>("[data-cg-sidebar]")
+  );
+}
+
+function getMeasuredSidebarOffset() {
+  if (typeof window === "undefined") return 0;
+
+  const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+  if (!isDesktop) return 0;
+
+  const sidebar = getSidebarElement();
+  if (!sidebar) return 0;
+
+  const rect = sidebar.getBoundingClientRect();
+
+  if (!Number.isFinite(rect.right) || rect.right <= 0) return 0;
+
+  return safeOffset(rect.right);
 }
 
 function buildPdfSrc(src: string, zoom: number, fitWidth: boolean) {
@@ -116,9 +146,49 @@ export default function InfluencerSidebarShell({
   children,
   pdfOnly = false,
 }: InfluencerSidebarShellProps) {
+  const contextSidebarOffset = useSidebarOffset();
+
+  const [mounted, setMounted] = useState(false);
+  const [measuredSidebarOffset, setMeasuredSidebarOffset] = useState(0);
   const [internalPreviewUrl, setInternalPreviewUrl] = useState("");
   const [pdfZoom, setPdfZoom] = useState(PDF_DEFAULT_ZOOM);
   const [fitWidth, setFitWidth] = useState(false);
+
+  const updateMeasuredOffset = useCallback(() => {
+    setMeasuredSidebarOffset(getMeasuredSidebarOffset());
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    updateMeasuredOffset();
+
+    const firstFrame = window.requestAnimationFrame(updateMeasuredOffset);
+    const lateMeasure = window.setTimeout(updateMeasuredOffset, 350);
+
+    window.addEventListener("resize", updateMeasuredOffset);
+
+    const sidebar = getSidebarElement();
+    const resizeObserver =
+      sidebar && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(updateMeasuredOffset)
+        : null;
+
+    if (sidebar && resizeObserver) {
+      resizeObserver.observe(sidebar);
+    }
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.clearTimeout(lateMeasure);
+      window.removeEventListener("resize", updateMeasuredOffset);
+      resizeObserver?.disconnect();
+    };
+  }, [isOpen, updateMeasuredOffset]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -190,7 +260,11 @@ export default function InfluencerSidebarShell({
         zoomOut();
       }
 
-      if (pdfOnly && (e.ctrlKey || e.metaKey) && (e.key === "+" || e.key === "=")) {
+      if (
+        pdfOnly &&
+        (e.ctrlKey || e.metaKey) &&
+        (e.key === "+" || e.key === "=")
+      ) {
         e.preventDefault();
         zoomIn();
       }
@@ -205,28 +279,28 @@ export default function InfluencerSidebarShell({
     return () => window.removeEventListener("keydown", handler);
   }, [isOpen, onClose, pdfOnly, resetZoom, zoomIn, zoomOut]);
 
-  const resolvedOffset = safeOffset(sidebarOffset);
+  const resolvedOffset = useMemo(() => {
+    const propOffset = safeOffset(sidebarOffset);
+    const ctxOffset = safeOffset(contextSidebarOffset);
+    const measuredOffset = safeOffset(measuredSidebarOffset);
 
-  if (!isOpen) return null;
+    return propOffset || ctxOffset || measuredOffset;
+  }, [sidebarOffset, contextSidebarOffset, measuredSidebarOffset]);
 
-  return (
+  if (!isOpen || !mounted) return null;
+
+  const shell = (
     <div
-      className="fixed bottom-0 right-0 top-0 z-[50] flex overflow-hidden"
+      className="fixed bottom-0 right-0 top-0 z-[70] flex overflow-hidden bg-white"
       style={{
         left: resolvedOffset,
         width: `calc(100vw - ${resolvedOffset}px)`,
       }}
       role="dialog"
       aria-modal="true"
+      aria-label={title || "Contract"}
     >
-      <button
-        type="button"
-        className="absolute inset-0 cursor-default bg-black/40 backdrop-blur-[2px]"
-        onClick={onClose}
-        aria-label="Close contract preview"
-      />
-
-      <div className="relative z-[51] flex h-full w-full flex-col bg-white shadow-2xl">
+      <div className="relative flex h-full w-full flex-col bg-white shadow-2xl">
         <div className="flex min-h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-3 sm:px-6">
           <div className="flex min-w-0 flex-col">
             {title ? (
@@ -279,20 +353,21 @@ export default function InfluencerSidebarShell({
             </div>
           </>
         ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden bg-white lg:grid-cols-2">
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden bg-white lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <div className="min-h-0 w-full overflow-y-auto border-b border-[#E6E6E6] bg-white lg:border-b-0 lg:border-r">
               <div className="w-full p-4 sm:p-5">{children}</div>
             </div>
 
-            <div className="min-h-0 w-full overflow-hidden bg-white">
+            <div className="min-h-0 w-full overflow-hidden bg-[#252525]">
               {pdfSrc ? (
                 <iframe
+                  key={pdfSrc}
                   src={pdfSrc}
                   title="Contract PDF preview"
-                  className="h-full w-full border-0 bg-white"
+                  className="h-full w-full border-0 bg-[#252525]"
                 />
               ) : (
-                <div className="flex h-full w-full items-center justify-center bg-white text-sm text-gray-400">
+                <div className="flex h-full w-full items-center justify-center bg-[#252525] text-sm text-white/70">
                   Loading contract preview…
                 </div>
               )}
@@ -308,4 +383,6 @@ export default function InfluencerSidebarShell({
       </div>
     </div>
   );
+
+  return createPortal(shell, document.body);
 }

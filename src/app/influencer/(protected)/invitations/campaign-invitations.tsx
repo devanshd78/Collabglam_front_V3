@@ -794,7 +794,6 @@ function InvitationPageSkeleton() {
       </section>
 
       <div className="flex w-[0.625rem] shrink-0 items-start justify-center px-[0.0625rem] pt-[2rem]">
-        <div className="h-[4.8125rem] flex-1 rounded-[6.25rem] bg-[#E6E6E6]" />
       </div>
 
       <section className="relative min-w-0 flex-1 overflow-hidden pb-[4rem]">
@@ -1082,7 +1081,6 @@ export default function InvitesPage() {
                     "px-[0.0625rem] pb-[0.0625rem] pt-[2rem]",
                   ].join(" ")}
                 >
-                  <div className="h-[4.8125rem] flex-1 rounded-[var(--Sizes-Border-Radius-Pill,6.25rem)] bg-[#E6E6E6]" />
                 </div>
 
                 <section className="sticky top-0 h-full min-h-0 min-w-0 flex-1 overflow-hidden pb-[4rem]">
