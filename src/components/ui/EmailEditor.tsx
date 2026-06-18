@@ -31,10 +31,27 @@ export type EmailEditorAttachment = {
 
 export type EmailEditorPayload = {
   to: string;
+
+  // IMPORTANT:
+  // Backend /newinvitations/create checks these fields to resolve influencer email.
+  recipientEmail: string;
+  influencerEmail: string;
+  creatorEmail: string;
+  businessEmail: string;
+  contactEmail: string;
+
   subject: string;
   body: string;
   htmlBody: string;
   attachments: EmailEditorAttachment[];
+
+  fromEmail: string;
+  fromName: string;
+  fromProxyMailId: string;
+
+  toName: string;
+  toEmail: string;
+  toProxyMailId: string;
 };
 
 export type EmailEditorProps = {
@@ -75,6 +92,21 @@ function escapeHtml(value: string) {
 
 function plainTextToHtml(value: string) {
   return escapeHtml(value).replace(/\n/g, "<br />");
+}
+
+function isValidEmail(value = "") {
+  return /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/.test(
+    String(value || "").trim(),
+  );
+}
+
+function getFirstValidEmail(...values: Array<string | undefined | null>) {
+  for (const value of values) {
+    const email = String(value || "").trim();
+    if (isValidEmail(email)) return email;
+  }
+
+  return "";
 }
 
 function getFallback(name: string) {
@@ -248,6 +280,8 @@ export default function EmailEditor({
   const toReal = (toEmail || "").trim();
   const toPrimaryMail = toProxy || to || toReal;
 
+  const resolvedRecipientEmail = getFirstValidEmail(toReal, to, toProxy);
+
   const syncEditorState = React.useCallback(() => {
     if (!editorRef.current) return;
     setEditorHtml(editorRef.current.innerHTML);
@@ -284,7 +318,9 @@ export default function EmailEditor({
   React.useEffect(() => {
     if (!open) return;
 
-    const initialTo = toProxyMailId || toLabel || toEmail || "";
+    // IMPORTANT:
+    // Prefer real influencer email first. Proxy should only be fallback.
+    const initialTo = toEmail || toLabel || toProxyMailId || "";
 
     setTo(initialTo);
     setMailSubject(subject || "");
@@ -357,7 +393,9 @@ export default function EmailEditor({
       document.execCommand(
         "insertHTML",
         false,
-        `<img src="${src}" alt="${escapeHtml(file.name)}" style="max-width: 100%; border-radius: 8px; margin: 8px 0;" />`,
+        `<img src="${src}" alt="${escapeHtml(
+          file.name,
+        )}" style="max-width: 100%; border-radius: 8px; margin: 8px 0;" />`,
       );
     }
 
@@ -400,13 +438,34 @@ export default function EmailEditor({
     return (editorRef.current?.innerHTML || "").trim();
   };
 
-  const buildPayload = (): EmailEditorPayload => ({
-    to: (to || toProxy || toReal).trim(),
-    subject: mailSubject.trim(),
-    body: getPlainBody(),
-    htmlBody: getHtmlBody(),
-    attachments,
-  });
+  const buildPayload = (): EmailEditorPayload => {
+    const recipientEmail = getFirstValidEmail(toReal, to, toProxy);
+
+    return {
+      to: (to || toReal || toProxy).trim(),
+
+      // IMPORTANT:
+      // Send these to backend root body.
+      recipientEmail,
+      influencerEmail: recipientEmail,
+      creatorEmail: recipientEmail,
+      businessEmail: recipientEmail,
+      contactEmail: recipientEmail,
+
+      subject: mailSubject.trim(),
+      body: getPlainBody(),
+      htmlBody: getHtmlBody(),
+      attachments,
+
+      fromEmail: fromReal || fromProxy,
+      fromName: fromDisplayName,
+      fromProxyMailId: fromProxy,
+
+      toName: toDisplayName,
+      toEmail: toReal,
+      toProxyMailId: toProxy,
+    };
+  };
 
   const handleSend = async () => {
     await onSend(buildPayload());
@@ -510,6 +569,10 @@ export default function EmailEditor({
                       <div className="truncate text-[12px] text-[#5f6368]">
                         {fromProxy}
                       </div>
+                    ) : fromReal ? (
+                      <div className="truncate text-[12px] text-[#5f6368]">
+                        {fromReal}
+                      </div>
                     ) : null}
                   </div>
                 </div>
@@ -547,7 +610,7 @@ export default function EmailEditor({
 
                     {toProxy && toProxy !== to ? (
                       <div className="truncate text-[12px] text-[#5f6368]">
-                        {toProxy}
+                        Proxy: {toProxy}
                       </div>
                     ) : null}
                   </div>
@@ -584,13 +647,13 @@ export default function EmailEditor({
                   </select>
                 </div>
 
-                <div className="mx-1 h-4 w-[1px] shrink-0 bg-[#e0e0e0]"></div>
+                <div className="mx-1 h-4 w-[1px] shrink-0 bg-[#e0e0e0]" />
 
                 <ToolbarButton onClick={() => exec("foreColor", "#202124")}>
                   <div className="h-3.5 w-3.5 rounded-full bg-[#202124]" />
                 </ToolbarButton>
 
-                <div className="mx-1 h-4 w-[1px] shrink-0 bg-[#e0e0e0]"></div>
+                <div className="mx-1 h-4 w-[1px] shrink-0 bg-[#e0e0e0]" />
 
                 <ToolbarButton
                   active={formatState.bold}
@@ -611,7 +674,7 @@ export default function EmailEditor({
                   <TextUnderline size={16} />
                 </ToolbarButton>
 
-                <div className="mx-1 h-4 w-[1px] shrink-0 bg-[#e0e0e0]"></div>
+                <div className="mx-1 h-4 w-[1px] shrink-0 bg-[#e0e0e0]" />
 
                 <ToolbarButton onClick={() => exec("undo")}>
                   <ArrowCounterClockwise size={16} />
@@ -620,7 +683,7 @@ export default function EmailEditor({
                   <ArrowClockwise size={16} />
                 </ToolbarButton>
 
-                <div className="mx-1 h-4 w-[1px] shrink-0 bg-[#e0e0e0]"></div>
+                <div className="mx-1 h-4 w-[1px] shrink-0 bg-[#e0e0e0]" />
 
                 <ToolbarButton
                   active={formatState.unorderedList}
@@ -719,6 +782,13 @@ export default function EmailEditor({
 
                   <IconButton aria-label="Signature" onClick={insertSignature}>
                     <Signature size={18} />
+                  </IconButton>
+
+                  <IconButton
+                    aria-label="Insert inline image"
+                    onClick={() => imageInputRef.current?.click()}
+                  >
+                    <ImageSquare size={18} />
                   </IconButton>
                 </div>
 

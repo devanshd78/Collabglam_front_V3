@@ -332,8 +332,8 @@ export function ListCard({
     <div
       className={cx(
         "relative",
-        disabled ? "cursor-pointer" : "",
-        isClickable && "cursor-pointer"
+        isClickable && "group cursor-pointer",
+        disabled && "cursor-pointer"
       )}
       title={disabled ? disabledTitle : undefined}
       aria-disabled={disabled || undefined}
@@ -346,6 +346,9 @@ export function ListCard({
         className={cx(
           WRAP_BASE,
           WRAP_GRID,
+          "transition-all duration-200 ease-out",
+          isClickable &&
+          "group-hover:bg-shuttle/10 group-hover:border-shuttle/30 group-hover:shadow-[0_10px_28px_rgba(15,23,42,0.08)]",
           className,
           disabled && "pointer-events-none select-none blur-[3px] opacity-60"
         )}

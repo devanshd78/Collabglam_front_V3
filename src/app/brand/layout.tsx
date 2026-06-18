@@ -70,6 +70,10 @@ export default function BrandAppLayout({
     setCheckingAuth(false);
   }, [router, pathname, isPublicNoScaffoldRoute]);
 
+  if (isPublicNoScaffoldRoute) {
+    return <>{children}</>;
+  }
+
   if (checkingAuth) {
     return (
       <div className="flex h-dvh items-center justify-center bg-white">

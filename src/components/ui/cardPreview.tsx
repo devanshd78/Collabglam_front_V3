@@ -503,8 +503,6 @@ export function ManualPreviewCard({
   invite,
   className = "",
   onViewClick,
-  showViewMilestone = false,
-  onViewMilestone,
 }: {
   form: ManualForm;
   meta?: PreviewMeta;
@@ -512,8 +510,6 @@ export function ManualPreviewCard({
   invite?: InviteCardProps;
   className?: string;
   onViewClick?: () => void;
-  showViewMilestone?: boolean;
-  onViewMilestone?: () => void;
 }) {
   console.log("Contract in manualpreview card", contract)
   const title = form.title?.trim() ?? "";
@@ -557,54 +553,53 @@ export function ManualPreviewCard({
   return (
     <div
       className={[
-        "w-full max-w-[26.25rem] rounded-[1.625rem] bg-white p-5 border border-[#D6D6D6]",
+        "w-full max-w-[26.25rem] overflow-hidden rounded-[1.625rem] bg-white p-5 border border-[#D6D6D6]",
         "[@media_(max-width:80rem)_and_(max-height:48.75rem)]:max-w-[23.75rem]",
         "[@media_(max-width:80rem)_and_(max-height:48.75rem)]:p-4",
         className,
       ].join(" ")}
     >
       {/* Campaign goal badge */}
-      <div className="flex justify-end">
-        {topBadge ? (
-          <CampaignGlobalBadge value={topBadge} />
-        ) : (
-          <div className="h-6 w-16 rounded-full bg-neutral-100" />
-        )}
-      </div>
-
-      {/* center image icon */}
-      <div className="mt-6 [@media_(max-width:80rem)_and_(max-height:50rem)]:mt-5">
-        {heroImage ? (
-          <div className="relative h-44 w-full overflow-hidden rounded-2xl bg-neutral-100">
-            <img
-              src={heroImage}
-              alt={title || "Campaign product"}
-              className="h-full w-full object-cover"
-            />
-            {imageCount > 1 && (
-              <div className="absolute right-3 top-3 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white">
-                +{imageCount - 1} more
+      <div className="-mx-5 -mt-5">
+        <div className="relative h-[13.75rem] w-full bg-[#F7F7F7]">
+          <div className="h-full w-full overflow-hidden rounded-t-[1.625rem]">
+            {heroImage ? (
+              <img
+                src={heroImage}
+                alt={title || "Campaign product"}
+                className="h-full w-full object-contain object-center"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <Images className="h-[4.625rem] w-[4.625rem] text-[#EDEDED] [@media_(max-width:80rem)_and_(max-height:48.75rem)]:scale-[0.92]" />
               </div>
             )}
           </div>
-        ) : (
-          <div className="flex justify-center">
-            <Images className="h-[4.625rem] w-[4.625rem] text-[#EDEDED] [@media_(max-width:80rem)_and_(max-height:48.75rem)]:scale-[0.92]" />
-          </div>
-        )}
-      </div>
 
-      {/* AD badge */}
-      <div className="mt-8 [@media_(max-width:80rem)_and_(max-height:50rem)]:mt-6">
-        <div className="grid h-11 w-11 place-items-center rounded-s border-2 border-neutral-200 bg-white">
-          <span className="text-[0.75rem] font-semibold tracking-wide text-neutral-900">
-            AD
-          </span>
+          {topBadge ? (
+            <div className="absolute right-3 top-3">
+              <CampaignGlobalBadge value={topBadge} />
+            </div>
+          ) : null}
+
+          {imageCount > 1 ? (
+            <div className="absolute right-3 top-12 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white">
+              +{imageCount - 1} more
+            </div>
+          ) : null}
+
+          <div className="absolute left-5 bottom-[-1.375rem] z-10">
+            <div className="grid h-11 w-11 place-items-center rounded-s border-2 border-neutral-200 bg-white">
+              <span className="text-[0.75rem] font-semibold tracking-wide text-neutral-900">
+                AD
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* top row: Category + Age + dots */}
-      <div className="mt-6 flex items-center justify-between gap-3 [@media_(max-width:1280px)_and_(max-height:800px)]:mt-4">
+      <div className="mt-8 flex items-center justify-between gap-3 [@media_(max-width:1280px)_and_(max-height:800px)]:mt-7">
         <div className="flex items-center gap-3 min-w-0">
           {categoryLabel ? (
             <OutlinedPill className="max-w-[150px]">
@@ -675,44 +670,41 @@ export function ManualPreviewCard({
 
       <div className="mt-6 h-px w-full bg-neutral-100 [@media_(max-width:80rem)_and_(max-height:50rem)]:mt-5" />
 
+      <div className="mt-4 flex w-full items-center justify-between gap-3 [@media_(max-width:1280px)_and_(max-height:800px)]:mt-3">
+        <div className="min-w-0 flex-1">
+          {budget > 0 ? (
+            <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[#1A1A1A] font-['Inter'] text-[1.25rem] font-semibold leading-[1.75rem] tracking-[0]">
+              ${formatBudget(budget)}
+            </span>
+          ) : (
+            <div className="h-4 w-24 rounded-full bg-neutral-100" />
+          )}
+        </div>
 
-      <div className="mt-4 flex items-center justify-between gap-3 [@media_(max-width:1280px)_and_(max-height:800px)]:mt-3">
-
-        <div className="mt-4 flex items-center justify-between gap-3 [@media_(max-width:1280px)_and_(max-height:800px)]:mt-3">
-          <div className="min-w-0 flex-1">
-            {budget > 0 ? (
-              <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[#1A1A1A] font-['Inter'] text-[1.25rem] font-semibold leading-[1.75rem] tracking-[0]">
-                ${formatBudget(budget)}
-              </span>
-            ) : (
-              <div className="h-4 w-24 rounded-full bg-neutral-100" />
-            )}
-          </div>
-
+        <div className="ml-auto flex shrink-0 items-center justify-end gap-3">
           {invite ? (
             <InviteActions invite={invite} />
-          ) : showViewMilestone ? (
-            <div className="flex items-center gap-3 shrink-0">
-              <Button
-                variant="default"
-                onClick={onViewMilestone}
-                className="bg-black text-white"
-              >
-                View Milestone
-              </Button>
-            </div>
           ) : contract ? (
             <ContractActions contract={contract} />
           ) : (
-            <div className="flex items-center gap-3 shrink-0">
-              <Button variant="ghost" className="shadow-none hover:bg-white">
-                <BookmarkSimpleIcon />
-                <span>Save</span>
+            <>
+              <Button
+                variant="ghost"
+                disabled
+                className="cursor-not-allowed shadow-none opacity-50 hover:bg-white"
+              >
+                Save
               </Button>
-              <Button variant="default" onClick={onViewClick}>
-                View
+
+              <Button
+                variant="default"
+                onClick={onViewClick}
+                disabled
+                className="cursor-not-allowed opacity-50"
+              >
+                Apply
               </Button>
-            </div>
+            </>
           )}
         </div>
       </div>

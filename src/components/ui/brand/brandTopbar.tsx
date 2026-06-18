@@ -622,13 +622,22 @@ export default function BrandTopbar({
 
                 return (
                   <React.Fragment key={c.href}>
-                    <Link
-                      href={c.href}
-                      style={last ? selectedStyle : prevStyle}
-                      className="min-w-0"
-                    >
-                      {c.label}
-                    </Link>
+                    {c.label === "Influencer" ? (
+                      <span
+                        style={last ? selectedStyle : prevStyle}
+                        className="min-w-0"
+                      >
+                        {c.label}
+                      </span>
+                    ) : (
+                      <Link
+                        href={c.href}
+                        style={last ? selectedStyle : prevStyle}
+                        className="min-w-0"
+                      >
+                        {c.label}
+                      </Link>
+                    )}
 
                     {!last ? (
                       <span

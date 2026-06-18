@@ -1534,8 +1534,7 @@ export default function BrandSidebar({
                       aria-label="Hide subscription card"
                       onClick={handleHideSubscriptionCard}
                       className={cn(
-                        "absolute -right-2 -top-2 z-10 grid h-5 w-5 place-items-center rounded-full bg-white text-[#1a1a1a] shadow-sm transition hover:bg-neutral-100",
-                        FOCUS_RING
+                        "absolute -right-2 -top-2 z-10 grid h-5 w-5 place-items-center rounded-full text-[#1a1a1a] transition hover:bg-neutral-100",
                       )}
                     >
                       <X size={12} weight="bold" />
@@ -1607,7 +1606,7 @@ export default function BrandSidebar({
                       aria-label="Hide subscription card"
                       onClick={handleHideSubscriptionCard}
                       className={cn(
-                        "absolute right-2 top-2 z-20 grid h-7 w-7 place-items-center rounded-full bg-white/85 text-[#1a1a1a] shadow-sm transition hover:bg-white",
+                        "absolute right-2 top-2 z-20 grid h-7 w-7 place-items-center text-[#1a1a1a] transition hover:text-black cursor-pointer",
                         FOCUS_RING
                       )}
                     >

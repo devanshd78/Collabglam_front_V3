@@ -6,12 +6,25 @@ import {
   ArrowLeft,
   AlertCircle,
   BarChart3,
+  CalendarDays,
+  CheckCircle2,
+  Globe,
+  Heart,
+  Mail,
+  PlayCircle,
   RefreshCw,
   Send,
+  ShieldCheck,
+  Sparkles,
+  Target,
+  TrendingUp,
+  Users,
   X,
+  Zap,
   MessageSquare,
 } from 'lucide-react';
 import Swal from 'sweetalert2';
+import { createPortal } from 'react-dom';
 import type { ReportResponse, Platform } from './types';
 import { normalizeReport } from './utils';
 import {
@@ -76,6 +89,7 @@ interface DetailPanelProps {
   campaignId?: string | null;
   campaignName?: string | null;
   handle: string | null;
+  youtubeChannelId?: string | null;
   lastFetchedAt?: string | null;
   onRefreshReport?: () => Promise<void> | void;
   connectedProfiles?: InfluencerReport[];
@@ -259,6 +273,8 @@ type EmailDraftState = {
   fromEmail: string;
   fromName: string;
   toLabel: string;
+  toEmail?: string;
+  missingEmailId?: string | null;
   subject: string;
   initialBody: string;
   initialHtmlBody: string;
@@ -287,7 +303,15 @@ type ResolvedTemplateDraft = {
 
 const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const BACKEND_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+const DETAIL_PANEL_API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || '';
 const API_REPORT_ENDPOINT = `${BACKEND_BASE_URL}/modash/report`;
+
+function getDetailPanelApiUrl(path: string) {
+  const base = String(DETAIL_PANEL_API_BASE_URL || '').replace(/\/$/, '');
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${cleanPath}`;
+}
 
 function normalizePlatform(platform: Platform | null): 'instagram' | 'tiktok' | 'youtube' {
   const value = String(platform ?? '').toLowerCase();
@@ -1301,10 +1325,12 @@ function CampaignInvitePicker({
 
   if (!open) return null;
 
-  return (
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <div
       ref={rootRef}
-      className="absolute right-0 top-[calc(100%+12px)] z-[140] w-[min(460px,calc(100vw-32px))] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
+      className="fixed right-4 top-[76px] z-[2147483647] w-[min(460px,calc(100vw-32px))] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-[0_24px_60px_rgba(15,23,42,0.22)] sm:right-6 lg:right-8"
     >
       <div className="max-h-[320px] overflow-y-auto px-3 py-3">
         {loading ? (
@@ -1319,19 +1345,27 @@ function CampaignInvitePicker({
               const imageSrc = getCampaignPrimaryImage(item);
 
               return (
-                <button
+                <div
                   key={item.campaignId}
-                  type="button"
-                  disabled={isAlreadyInvited}
+                  role="button"
+                  tabIndex={isAlreadyInvited ? -1 : 0}
+                  aria-disabled={isAlreadyInvited}
                   onClick={() => {
                     if (isAlreadyInvited) return;
                     onSelectedIdsChange(checked ? [] : [item.campaignId]);
                   }}
+                  onKeyDown={(event) => {
+                    if (isAlreadyInvited) return;
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onSelectedIdsChange(checked ? [] : [item.campaignId]);
+                    }
+                  }}
                   className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${isAlreadyInvited
                     ? 'cursor-not-allowed border border-gray-100 bg-gray-50 opacity-70'
                     : checked
-                      ? 'border border-gray-300 bg-gray-50'
-                      : 'border border-transparent hover:bg-gray-50'
+                      ? 'cursor-pointer border border-gray-300 bg-gray-50'
+                      : 'cursor-pointer border border-transparent hover:bg-gray-50'
                     }`}
                 >
                   <Checkbox
@@ -1372,7 +1406,7 @@ function CampaignInvitePicker({
                       ) : null}
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -1406,7 +1440,8 @@ function CampaignInvitePicker({
             : `Send Invitation${selectedIds.length > 1 ? 's' : ''}`}
         </button>
       </div> */}
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -2071,6 +2106,694 @@ function SelectionReasonCard({
   );
 }
 
+type YouTubeMediaKitVideo = {
+  videoId?: string;
+  title?: string;
+  description?: string;
+  thumbnail?: string;
+  publishedAt?: string;
+  views?: number;
+  likes?: number;
+  comments?: number;
+  url?: string;
+};
+
+type YouTubeMediaKitData = {
+  creatorOverview?: {
+    creatorName?: string;
+    channelName?: string;
+    profilePhoto?: string;
+    bannerImage?: string;
+    category?: string;
+    creatorTier?: string;
+    primaryLanguage?: string;
+    country?: string;
+    estimatedAudienceCountry?: string;
+    countryConfidence?: number;
+    yearsOnYouTube?: number;
+    activeSinceLabel?: string;
+  };
+  coreMetrics?: {
+    subscribers?: number;
+    totalViews?: number;
+    totalVideos?: number;
+    avgViews?: number;
+    medianViews?: number;
+    avgLikes?: number;
+    avgComments?: number;
+    engagementRate?: number;
+    viewToSubscriberRatio?: number;
+    recentUploadDate?: string;
+    uploadsLast30Days?: number;
+    uploadsLast90Days?: number;
+    uploadsLast2Years?: number;
+  };
+  performanceScores?: {
+    engagementScore?: number;
+    consistencyScore?: number;
+    authenticityScore?: number;
+    brandSafetyScore?: number;
+    sponsorshipScore?: number;
+    relevancyScore?: number;
+    campaignFitScore?: number;
+    nicheFitScore?: number;
+  };
+  audienceInsights?: {
+    estimatedAudienceCountries?: { country: string; percentage: number }[];
+    interestCategories?: string[];
+    contentLanguage?: string;
+  };
+  brandFit?: {
+    matchedCampaignKeyword?: string;
+    matchedTopics?: string[];
+    campaignFit?: string;
+    whyThisCreatorFits?: string[];
+  };
+  contentAnalysis?: {
+    contentType?: string;
+    uploadFrequency?: string;
+    shortsPercentage?: number;
+    longFormPercentage?: number;
+    averageVideoLengthMinutes?: number | null;
+    recentVideoThemes?: string[];
+  };
+  sponsorshipAnalysis?: {
+    sponsoredVideosDetected?: number;
+    sponsorshipFrequency?: number;
+    recentSponsors?: string[];
+    promoCodeMentions?: number;
+    affiliateLinksDetected?: boolean;
+    collaborationReadiness?: string;
+  };
+  brandSafety?: {
+    score?: number;
+    riskLevel?: string;
+    flags?: string[];
+    safeCategories?: string[];
+  };
+  topPerformingVideos?: YouTubeMediaKitVideo[];
+  recentVideos?: YouTubeMediaKitVideo[];
+  campaignPrediction?: {
+    expectedViewsLow?: number;
+    expectedViewsHigh?: number;
+    expectedEngagementLow?: number;
+    expectedEngagementHigh?: number;
+    recommendedDeliverables?: string[];
+    budgetFit?: string;
+  };
+  contact?: {
+    hasContactInfo?: boolean;
+    maskedEmail?: string;
+    website?: string;
+    socialLinks?: { platform: string; url: string }[];
+  };
+  collabGlamRecommendation?: {
+    recommendation?: string;
+    summary?: string;
+  };
+};
+
+async function fetchDetailPanelYouTubeMediaKit(
+  channelId: string,
+  queryValues: Record<string, string>
+) {
+  const params = new URLSearchParams();
+
+  ['keyword', 'category', 'country'].forEach((key) => {
+    const value = String(queryValues[key] || '').trim();
+    if (value) params.set(key, value);
+  });
+
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const res = await fetch(
+    getDetailPanelApiUrl(`/youtube-data/media-kit/${encodeURIComponent(channelId)}${query}`),
+    {
+      method: 'GET',
+      credentials: 'include',
+    }
+  );
+
+  const json = await res.json().catch(() => ({}));
+
+  if (!res.ok || json?.success === false) {
+    throw new Error(json?.error || json?.message || 'Failed to load YouTube media kit');
+  }
+
+  return (json?.data || null) as YouTubeMediaKitData | null;
+}
+
+function formatYouTubeMediaKitNumber(value?: number | string | null) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+
+  return new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(n);
+}
+
+function formatYouTubeMediaKitFullNumber(value?: number | string | null) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  return new Intl.NumberFormat('en').format(n);
+}
+
+function formatYouTubeMediaKitPercent(value?: number | string | null) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return '0%';
+  return `${Math.round(n * 100) / 100}%`;
+}
+
+function formatYouTubeMediaKitDate(value?: string | null) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+
+  return date.toLocaleDateString('en', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function scoreYouTubeMediaKitValue(value?: number | string | null) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function getYouTubeMediaKitScoreTextClass(value?: number | string | null) {
+  const score = scoreYouTubeMediaKitValue(value);
+  if (score >= 75) return 'text-[#16803a]';
+  if (score >= 35) return 'text-[#b7791f]';
+  return 'text-[#dc2626]';
+}
+
+function getYouTubeMediaKitScoreBarClass(value?: number | string | null) {
+  const score = scoreYouTubeMediaKitValue(value);
+  if (score >= 75) return 'bg-[#16a34a]';
+  if (score >= 35) return 'bg-[#f59e0b]';
+  return 'bg-[#dc2626]';
+}
+
+function getCleanYouTubeMediaKitSummary(value?: string | null) {
+  return String(value || '')
+    .replace(/\bYouTube creator\b/gi, 'creator')
+    .replace(/\bYoutube creator\b/gi, 'creator')
+    .replace(/\bcampaign fit score\b/gi, 'match score')
+    .replace(/\bcampaign-fit score\b/gi, 'match score')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function proxyYouTubeMediaKitImageUrl(url?: string | null) {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  if (!/^https?:\/\//i.test(raw)) return raw;
+  return getDetailPanelApiUrl(`/youtube-data/image-proxy?url=${encodeURIComponent(raw)}`);
+}
+
+function getYouTubeMediaKitHeroBackgroundImage(data?: YouTubeMediaKitData | null) {
+  const banner = data?.creatorOverview?.bannerImage;
+  if (banner) return banner;
+
+  const videoImage =
+    data?.topPerformingVideos?.find((video) => video.thumbnail)?.thumbnail ||
+    data?.recentVideos?.find((video) => video.thumbnail)?.thumbnail ||
+    '';
+
+  return videoImage || data?.creatorOverview?.profilePhoto || '';
+}
+
+function YouTubeMediaKitPill({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded-full border border-[#efdba5] bg-[#fff8e6] px-3 py-1 text-xs font-semibold text-[#7a5a16]">
+      {children}
+    </span>
+  );
+}
+
+function YouTubeMediaKitMetricCard({
+  label,
+  value,
+  sub,
+  icon,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  icon?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-[22px] border border-[#f1e2c2] bg-white/95 p-5 shadow-sm">
+      <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-[#fff3c4] text-[#9a6500]">
+        {icon || <Sparkles className="h-5 w-5" />}
+      </div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-[#9a8a73]">{label}</p>
+      <p className="mt-1 text-[24px] font-black text-black">{value}</p>
+      {sub ? <p className="mt-1 text-xs leading-5 text-[#80725d]">{sub}</p> : null}
+    </div>
+  );
+}
+
+function YouTubeMediaKitScoreCard({
+  icon,
+  label,
+  value,
+  hint,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value?: number;
+  hint?: string;
+}) {
+  const finalValue = scoreYouTubeMediaKitValue(value);
+
+  return (
+    <div className="rounded-[22px] border border-[#f1e2c2] bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#fff3c4] text-[#9a6500]">
+          {icon}
+        </div>
+        <div className="text-right">
+          <p className={`text-[28px] font-black leading-none ${getYouTubeMediaKitScoreTextClass(finalValue)}`}>
+            {finalValue}
+          </p>
+          <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-[#9a8a73]">/100</p>
+        </div>
+      </div>
+      <p className="mt-4 text-sm font-bold text-black">{label}</p>
+      {hint ? <p className="mt-1 text-xs leading-5 text-[#80725d]">{hint}</p> : null}
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#f1e2c2]">
+        <div
+          className={`h-full rounded-full ${getYouTubeMediaKitScoreBarClass(finalValue)}`}
+          style={{ width: `${finalValue}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function YouTubeMediaKitSection({
+  title,
+  icon,
+  children,
+  className = '',
+}: {
+  title: string;
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`rounded-[26px] border border-[#f1e2c2] bg-white p-6 shadow-sm ${className}`}>
+      <div className="mb-5 flex items-center gap-2">
+        {icon ? <span className="text-[#b7791f]">{icon}</span> : null}
+        <h2 className="text-[18px] font-black text-black">{title}</h2>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function YouTubeMediaKitProgress({ value }: { value?: number }) {
+  const finalValue = Math.max(0, Math.min(100, Number(value || 0)));
+
+  return (
+    <div className="h-2 overflow-hidden rounded-full bg-[#f1e2c2]">
+      <div className="h-full rounded-full bg-[#d97706]" style={{ width: `${finalValue}%` }} />
+    </div>
+  );
+}
+
+function YouTubeMediaKitPanelContent({
+  loading,
+  error,
+  data,
+  fallbackReport,
+}: {
+  loading: boolean;
+  error: string | null;
+  data: YouTubeMediaKitData | null;
+  fallbackReport: InfluencerReport | null;
+}) {
+  if (loading) {
+    return (
+      <div className="grid min-h-[60vh] place-items-center">
+        <div className="max-w-[560px] rounded-[32px] border border-[#f1e2c2] bg-white p-9 text-center shadow-sm">
+          <div className="mx-auto flex h-16 w-16 animate-pulse items-center justify-center rounded-full bg-[#fff3c4] text-[#9a6500]">
+            <Sparkles className="h-8 w-8" />
+          </div>
+          <h1 className="mt-5 text-2xl font-black text-black">Building brand media kit</h1>
+          <p className="mt-2 text-sm leading-6 text-[#7d725f]">
+            Preparing audience, authenticity, performance, safety, sponsorship, and campaign prediction insights.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="grid min-h-[60vh] place-items-center">
+        <div className="max-w-[560px] rounded-[32px] border border-red-100 bg-white p-9 text-center shadow-sm">
+          <h1 className="text-2xl font-black text-black">Media kit unavailable</h1>
+          <p className="mt-2 text-sm leading-6 text-red-600">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="mb-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
+        No YouTube media kit data yet. Try opening the creator again.
+      </div>
+    );
+  }
+
+  const overview = data.creatorOverview;
+  const metrics = data.coreMetrics;
+  const scores = data.performanceScores;
+  const audience = data.audienceInsights;
+  const brandFit = data.brandFit;
+  const content = data.contentAnalysis;
+  const sponsorship = data.sponsorshipAnalysis;
+  const safety = data.brandSafety;
+  const prediction = data.campaignPrediction;
+  const contact = data.contact;
+  const recommendation = data.collabGlamRecommendation;
+  const topVideos = data.topPerformingVideos || [];
+  const recentVideos = data.recentVideos || [];
+  const heroBackgroundImage = getYouTubeMediaKitHeroBackgroundImage(data);
+  const displayName =
+    overview?.creatorName ||
+    overview?.channelName ||
+    fallbackReport?.name ||
+    fallbackReport?.fullname ||
+    fallbackReport?.username ||
+    'Creator';
+  const fitScore = scoreYouTubeMediaKitValue(scores?.campaignFitScore || scores?.relevancyScore);
+
+  return (
+    <div className="relative min-h-full bg-[#fffdf9]">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(circle_at_top,#fff3c4_0%,#fff9ea_38%,rgba(255,255,255,0)_78%)] opacity-70" />
+
+      <div className="relative z-10 mx-auto w-full max-w-full px-0 py-0">
+        <section className="relative overflow-hidden rounded-[34px] border border-[#eadfcb] bg-white shadow-[0_18px_45px_rgba(120,83,20,0.08)]">
+          {heroBackgroundImage ? (
+            <div
+              className="absolute inset-0 bg-cover bg-center opacity-[0.12]"
+              style={{ backgroundImage: `url(${proxyYouTubeMediaKitImageUrl(heroBackgroundImage)})` }}
+            />
+          ) : null}
+          <div className="absolute inset-0 bg-gradient-to-br from-white via-white/95 to-[#fff7e2]/85" />
+
+          <div className="relative grid gap-0 lg:grid-cols-[1.18fr_0.82fr]">
+            <div className="p-7 sm:p-9">
+              <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
+                <div className="h-28 w-28 shrink-0 overflow-hidden rounded-full border-4 border-white bg-[#f7efe0] shadow-[0_8px_22px_rgba(0,0,0,0.10)] ring-1 ring-[#eadfcb]">
+                  {overview?.profilePhoto || fallbackReport?.picture ? (
+                    <img
+                      src={proxyYouTubeMediaKitImageUrl(overview?.profilePhoto || fallbackReport?.picture)}
+                      alt={displayName}
+                      className="h-full w-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center text-4xl font-black text-[#8a6a2a]">
+                      {displayName.slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+
+                <div className="min-w-0">
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {overview?.creatorTier ? <YouTubeMediaKitPill>{overview.creatorTier}</YouTubeMediaKitPill> : null}
+                    {overview?.category ? <YouTubeMediaKitPill>{overview.category}</YouTubeMediaKitPill> : null}
+                    {overview?.primaryLanguage ? <YouTubeMediaKitPill>{overview.primaryLanguage}</YouTubeMediaKitPill> : null}
+                  </div>
+                  <h1 className="text-[34px] font-black leading-tight text-black sm:text-[42px]">
+                    {displayName}
+                  </h1>
+                  <p className="mt-3 max-w-[760px] line-clamp-3 text-sm leading-6 text-[#6f6658]">
+                    {getCleanYouTubeMediaKitSummary(recommendation?.summary) ||
+                      'Brand-ready creator profile with performance, audience, safety, and match-score signals.'}
+                  </p>
+                  {contact?.maskedEmail ? (
+                    <div className="mt-4 inline-flex max-w-full items-center gap-2 rounded-full border border-[#eadfcb] bg-white/85 px-3.5 py-2 text-xs font-bold text-[#5f4b24] shadow-sm backdrop-blur">
+                      <Mail className="h-3.5 w-3.5 shrink-0 text-[#9a6500]" />
+                      <span className="truncate">{contact.maskedEmail}</span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-[#eadfcb] bg-[#fffaf0]/90 p-7 text-black backdrop-blur-sm sm:p-9 lg:border-l lg:border-t-0">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7a6440]">Match score</p>
+              <p className="mt-2 text-[46px] font-black leading-none text-black">{fitScore}</p>
+              <p className="mt-2 text-lg font-black text-black">
+                {brandFit?.campaignFit || recommendation?.recommendation || 'Brand Match'}
+              </p>
+              <div className="mt-7 grid grid-cols-2 gap-6">
+                <div>
+                  <p className="text-xs font-bold uppercase text-[#7a6440]">Authenticity</p>
+                  <p className={`mt-1 text-3xl font-black ${getYouTubeMediaKitScoreTextClass(scores?.authenticityScore)}`}>
+                    {scoreYouTubeMediaKitValue(scores?.authenticityScore)}%
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase text-[#7a6440]">Safety</p>
+                  <p className={`mt-1 text-3xl font-black ${getYouTubeMediaKitScoreTextClass(scores?.brandSafetyScore)}`}>
+                    {scoreYouTubeMediaKitValue(scores?.brandSafetyScore)}%
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <YouTubeMediaKitMetricCard label="Subscribers" value={formatYouTubeMediaKitNumber(metrics?.subscribers)} sub={formatYouTubeMediaKitFullNumber(metrics?.subscribers)} icon={<Users className="h-5 w-5" />} />
+          <YouTubeMediaKitMetricCard label="Average views" value={formatYouTubeMediaKitNumber(metrics?.avgViews)} sub="Recent video average" icon={<PlayCircle className="h-5 w-5" />} />
+          <YouTubeMediaKitMetricCard label="Engagement" value={formatYouTubeMediaKitPercent(metrics?.engagementRate)} sub="Likes + comments / views" icon={<Heart className="h-5 w-5" />} />
+          <YouTubeMediaKitMetricCard label="Recent upload" value={formatYouTubeMediaKitDate(metrics?.recentUploadDate)} sub={`${metrics?.uploadsLast2Years || 0} uploads in 2 years`} icon={<CalendarDays className="h-5 w-5" />} />
+        </div>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <YouTubeMediaKitScoreCard icon={<Target className="h-5 w-5" />} label="Relevancy" value={scores?.relevancyScore} hint="Campaign topic and content match" />
+          <YouTubeMediaKitScoreCard icon={<ShieldCheck className="h-5 w-5" />} label="Brand safety" value={scores?.brandSafetyScore} hint={safety?.riskLevel ? `${safety.riskLevel} risk` : 'Risk screening'} />
+          <YouTubeMediaKitScoreCard icon={<Users className="h-5 w-5" />} label="Authenticity" value={scores?.authenticityScore} hint="Audience quality" />
+          <YouTubeMediaKitScoreCard icon={<TrendingUp className="h-5 w-5" />} label="Consistency" value={scores?.consistencyScore} hint="Upload activity and stability" />
+        </div>
+
+        <div className="mt-6 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+          <YouTubeMediaKitSection title="Audience Insights" icon={<Globe className="h-5 w-5" />}>
+            <div className="space-y-4">
+              {(audience?.estimatedAudienceCountries || []).length ? (
+                audience?.estimatedAudienceCountries?.slice(0, 5).map((item) => (
+                  <div key={item.country}>
+                    <div className="mb-2 flex items-center justify-between text-sm font-bold text-black">
+                      <span>{item.country}</span>
+                      <span>{item.percentage}%</span>
+                    </div>
+                    <YouTubeMediaKitProgress value={item.percentage} />
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm leading-6 text-[#655b4d]">Audience country data is not available for this creator.</p>
+              )}
+              {(audience?.interestCategories || []).length ? (
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {audience?.interestCategories?.slice(0, 12).map((item) => <YouTubeMediaKitPill key={item}>{item}</YouTubeMediaKitPill>)}
+                </div>
+              ) : null}
+            </div>
+          </YouTubeMediaKitSection>
+
+          <YouTubeMediaKitSection title="Brand Fit" icon={<CheckCircle2 className="h-5 w-5" />}>
+            {(brandFit?.whyThisCreatorFits || []).length ? (
+              <ul className="space-y-3">
+                {brandFit?.whyThisCreatorFits?.slice(0, 5).map((item) => (
+                  <li key={item} className="flex gap-3 text-sm leading-6 text-[#655b4d]">
+                    <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#fff3c4] text-[#9a6500]">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    </span>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm leading-6 text-[#655b4d]">
+                This creator has been matched using campaign topic, performance, safety, and audience signals.
+              </p>
+            )}
+          </YouTubeMediaKitSection>
+        </div>
+
+        <div className="mt-6 grid gap-6 lg:grid-cols-3">
+          <YouTubeMediaKitSection title="Reach & Performance" icon={<BarChart3 className="h-5 w-5" />} className="lg:col-span-2">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <YouTubeMediaKitMetricCard label="Total views" value={formatYouTubeMediaKitNumber(metrics?.totalViews)} sub={formatYouTubeMediaKitFullNumber(metrics?.totalViews)} />
+              <YouTubeMediaKitMetricCard label="Total videos" value={formatYouTubeMediaKitFullNumber(metrics?.totalVideos)} />
+              <YouTubeMediaKitMetricCard label="Median views" value={formatYouTubeMediaKitNumber(metrics?.medianViews)} />
+              <YouTubeMediaKitMetricCard label="Avg likes" value={formatYouTubeMediaKitNumber(metrics?.avgLikes)} />
+              <YouTubeMediaKitMetricCard label="Avg comments" value={formatYouTubeMediaKitNumber(metrics?.avgComments)} />
+              <YouTubeMediaKitMetricCard label="View/sub ratio" value={formatYouTubeMediaKitPercent(metrics?.viewToSubscriberRatio)} />
+            </div>
+          </YouTubeMediaKitSection>
+
+          <YouTubeMediaKitSection title="Content Breakdown" icon={<Zap className="h-5 w-5" />}>
+            <div className="space-y-4">
+              <div>
+                <div className="mb-2 flex justify-between text-sm font-bold text-black">
+                  <span>Long-form</span>
+                  <span>{content?.longFormPercentage || 0}%</span>
+                </div>
+                <YouTubeMediaKitProgress value={content?.longFormPercentage || 0} />
+              </div>
+              <div>
+                <div className="mb-2 flex justify-between text-sm font-bold text-black">
+                  <span>Shorts</span>
+                  <span>{content?.shortsPercentage || 0}%</span>
+                </div>
+                <YouTubeMediaKitProgress value={content?.shortsPercentage || 0} />
+              </div>
+              <div className="rounded-[18px] bg-[#fff8e6] p-4 text-sm font-semibold text-[#6f5a2c]">
+                {content?.contentType || 'Original creator content'}
+              </div>
+              {(content?.recentVideoThemes || []).length ? (
+                <div className="flex flex-wrap gap-2">
+                  {content?.recentVideoThemes?.slice(0, 6).map((item) => <YouTubeMediaKitPill key={item}>{item}</YouTubeMediaKitPill>)}
+                </div>
+              ) : null}
+            </div>
+          </YouTubeMediaKitSection>
+        </div>
+
+        <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1fr]">
+          <YouTubeMediaKitSection title="Sponsorship Readiness" icon={<Sparkles className="h-5 w-5" />}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <YouTubeMediaKitMetricCard label="Sponsored videos" value={sponsorship?.sponsoredVideosDetected || 0} />
+              <YouTubeMediaKitMetricCard label="Sponsorship frequency" value={formatYouTubeMediaKitPercent(sponsorship?.sponsorshipFrequency)} />
+              <YouTubeMediaKitMetricCard label="Promo mentions" value={sponsorship?.promoCodeMentions || 0} />
+              <YouTubeMediaKitMetricCard label="Collab readiness" value={sponsorship?.collaborationReadiness || 'Review'} />
+            </div>
+            {(sponsorship?.recentSponsors || []).length ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {sponsorship?.recentSponsors?.slice(0, 8).map((item) => <YouTubeMediaKitPill key={item}>{item}</YouTubeMediaKitPill>)}
+              </div>
+            ) : null}
+          </YouTubeMediaKitSection>
+
+          <YouTubeMediaKitSection title="Brand Safety" icon={<ShieldCheck className="h-5 w-5" />} className="bg-[#111111] text-white">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-[22px] bg-white/10 p-5">
+                <p className="text-xs font-bold uppercase tracking-[0.15em] text-white/60">Score</p>
+                <p className="mt-2 text-[40px] font-black">{scoreYouTubeMediaKitValue(safety?.score || scores?.brandSafetyScore)}</p>
+              </div>
+              <div className="rounded-[22px] bg-white/10 p-5">
+                <p className="text-xs font-bold uppercase tracking-[0.15em] text-white/60">Risk level</p>
+                <p className="mt-2 text-[28px] font-black capitalize">{safety?.riskLevel || 'Low'}</p>
+              </div>
+            </div>
+            <div className="mt-6 rounded-[16px] border border-white/10 bg-white/10 p-4 text-sm text-white/85">
+              {(safety?.flags || []).length ? safety?.flags?.join(' · ') : 'No major concern detected'}
+            </div>
+          </YouTubeMediaKitSection>
+        </div>
+
+        <YouTubeMediaKitSection title="Proof of Performance" icon={<BarChart3 className="h-5 w-5" />} className="mt-6">
+          <div className="grid gap-4 lg:grid-cols-2">
+            {(topVideos.length ? topVideos : recentVideos).slice(0, 6).map((video) => (
+              <a
+                key={video.videoId || video.url || video.title}
+                href={video.url || '#'}
+                target="_blank"
+                rel="noreferrer"
+                className="grid gap-3 rounded-[20px] border border-[#f1e2c2] bg-[#fffdf9] p-3 transition hover:border-[#e0bd72] sm:grid-cols-[130px_1fr]"
+              >
+                <div className="aspect-video overflow-hidden rounded-[16px] bg-[#f7efe0]">
+                  {video.thumbnail ? (
+                    <img
+                      src={proxyYouTubeMediaKitImageUrl(video.thumbnail)}
+                      alt={video.title || 'Video'}
+                      className="h-full w-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center text-[#9a6500]">
+                      <PlayCircle className="h-7 w-7" />
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="line-clamp-2 text-sm font-bold leading-5 text-black">{video.title || 'Untitled video'}</p>
+                  <p className="mt-2 text-xs font-semibold text-[#7d725f]">
+                    {formatYouTubeMediaKitNumber(video.views)} views · {formatYouTubeMediaKitNumber(video.likes)} likes · {formatYouTubeMediaKitDate(video.publishedAt)}
+                  </p>
+                </div>
+              </a>
+            ))}
+          </div>
+        </YouTubeMediaKitSection>
+
+        <section className="mt-6 rounded-[26px] bg-gradient-to-br from-[#7c4a03] via-[#d97706] to-[#facc15] p-6 text-white shadow-sm">
+          <div className="grid gap-6 md:grid-cols-[1fr_1fr]">
+            <div>
+              <div className="flex items-center gap-2"><TrendingUp className="h-5 w-5" /><h4 className="text-[18px] font-bold">Predicted Campaign Impact</h4></div>
+              <p className="mt-5 text-[30px] font-black">
+                {formatYouTubeMediaKitNumber(prediction?.expectedViewsLow)} - {formatYouTubeMediaKitNumber(prediction?.expectedViewsHigh)}
+              </p>
+              <p className="text-sm text-white/80">Predicted views based on recent performance</p>
+              <p className="mt-5 text-[26px] font-black">
+                {formatYouTubeMediaKitNumber(prediction?.expectedEngagementLow)} - {formatYouTubeMediaKitNumber(prediction?.expectedEngagementHigh)}
+              </p>
+              <p className="text-sm text-white/80">Predicted engagements</p>
+            </div>
+            <div>
+              <p className="mb-3 text-xs font-bold uppercase tracking-wide text-white/75">Recommended deliverables</p>
+              <div className="space-y-2">
+                {(prediction?.recommendedDeliverables || []).length ? (
+                  prediction?.recommendedDeliverables?.map((item) => (
+                    <div key={item} className="flex items-center gap-2 text-sm"><CheckCircle2 className="h-4 w-4" /> {item}</div>
+                  ))
+                ) : (
+                  <div className="flex items-center gap-2 text-sm"><CheckCircle2 className="h-4 w-4" /> Creator content integration</div>
+                )}
+              </div>
+              <div className="mt-6 rounded-[16px] bg-white/15 p-4">
+                <p className="text-xs uppercase text-white/70">Budget fit for this creator</p>
+                <p className="mt-1 text-xl font-bold">{prediction?.budgetFit || 'Medium'}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {contact?.hasContactInfo || contact?.maskedEmail || contact?.website || (contact?.socialLinks || []).length ? (
+          <YouTubeMediaKitSection title="Contact Signals" icon={<Mail className="h-5 w-5" />} className="mt-6">
+            <div className="rounded-[18px] border border-[#f1e2c2] bg-[#fffaf0] p-4">
+              {contact?.maskedEmail ? (
+                <div className="flex items-center gap-3 text-sm font-semibold text-black"><Mail className="h-4 w-4 text-[#9a6500]" /> {contact.maskedEmail}</div>
+              ) : null}
+              {contact?.website ? (
+                <div className="mt-3 flex items-center gap-3 break-all text-sm font-semibold text-black"><Globe className="h-4 w-4 text-[#9a6500]" /> {contact.website}</div>
+              ) : null}
+              {(contact?.socialLinks || []).length ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {(contact?.socialLinks || []).map((link) => <YouTubeMediaKitPill key={`${link.platform}-${link.url}`}>{link.platform}</YouTubeMediaKitPill>)}
+                </div>
+              ) : null}
+            </div>
+          </YouTubeMediaKitSection>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 
 export const DetailPanel = React.memo<DetailPanelProps>(
   ({
@@ -2087,6 +2810,7 @@ export const DetailPanel = React.memo<DetailPanelProps>(
     campaignId: campaignIdProp,
     campaignName: campaignNameProp,
     handle,
+    youtubeChannelId: youtubeChannelIdProp,
     lastFetchedAt,
     onRefreshReport,
     connectedProfiles = [],
@@ -2097,6 +2821,8 @@ export const DetailPanel = React.memo<DetailPanelProps>(
     const searchParams = useSearchParams();
     const queryCampaignId = searchParams?.get('campaignId') || '';
     const queryCampaignName = searchParams?.get('campaignName') || '';
+    const queryChannelId =
+      searchParams?.get('channelId') || searchParams?.get('youtubeChannelId') || '';
 
     const campaignId = String(campaignIdProp || queryCampaignId || '').trim();
 
@@ -2132,6 +2858,10 @@ export const DetailPanel = React.memo<DetailPanelProps>(
     const [rateCardError, setRateCardError] = useState<string | null>(null);
     const [rateCardData, setRateCardData] =
       useState<SuggestedRateCardResponse["data"] | null>(null);
+
+    const [youtubeMediaKit, setYoutubeMediaKit] = useState<YouTubeMediaKitData | null>(null);
+    const [youtubeMediaKitLoading, setYoutubeMediaKitLoading] = useState(false);
+    const [youtubeMediaKitError, setYoutubeMediaKitError] = useState<string | null>(null);
 
     const rateCardRequestKeyRef = useRef("");
 
@@ -2398,6 +3128,93 @@ export const DetailPanel = React.memo<DetailPanelProps>(
     const activePlatformKey = normalizePlatform(
       ((selectedReport?.provider as Platform | null) ?? platform) as Platform | null
     );
+
+    const youtubeChannelIdForPanel = useMemo(() => {
+      if (activePlatformKey !== 'youtube') return '';
+
+      return String(
+        youtubeChannelIdProp ||
+        queryChannelId ||
+        (selectedReport as any)?.youtubeChannelId ||
+        (selectedReport as any)?.channelId ||
+        selectedReport?.modashId ||
+        (raw as any)?.channelId ||
+        (raw as any)?.userId ||
+        (raw as any)?.profile?.channelId ||
+        (raw as any)?.profile?.userId ||
+        (data as any)?.channelId ||
+        (data as any)?.profile?.channelId ||
+        (data as any)?.profile?.userId ||
+        ''
+      ).trim();
+    }, [
+      activePlatformKey,
+      youtubeChannelIdProp,
+      queryChannelId,
+      selectedReport,
+      raw,
+      data,
+    ]);
+
+    const isYouTubeMediaKitMode = activePlatformKey === 'youtube' && Boolean(youtubeChannelIdForPanel);
+
+    const youtubeMediaKitQueryValues = useMemo(
+      () => ({
+        keyword: String(searchParams?.get('keyword') || '').trim(),
+        category: String(searchParams?.get('category') || '').trim(),
+        country: String(searchParams?.get('country') || '').trim(),
+      }),
+      [searchParams]
+    );
+
+    useEffect(() => {
+      let cancelled = false;
+
+      async function loadYouTubeMediaKit() {
+        if (!open || !isYouTubeMediaKitMode || !youtubeChannelIdForPanel) {
+          setYoutubeMediaKit(null);
+          setYoutubeMediaKitError(null);
+          setYoutubeMediaKitLoading(false);
+          return;
+        }
+
+        try {
+          setYoutubeMediaKitLoading(true);
+          setYoutubeMediaKitError(null);
+
+          const mediaKit = await fetchDetailPanelYouTubeMediaKit(
+            youtubeChannelIdForPanel,
+            youtubeMediaKitQueryValues
+          );
+
+          if (!cancelled) {
+            setYoutubeMediaKit(mediaKit);
+          }
+        } catch (err: any) {
+          if (!cancelled) {
+            setYoutubeMediaKit(null);
+            setYoutubeMediaKitError(err?.message || 'Failed to load YouTube media kit');
+          }
+        } finally {
+          if (!cancelled) {
+            setYoutubeMediaKitLoading(false);
+          }
+        }
+      }
+
+      loadYouTubeMediaKit();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [
+      open,
+      isYouTubeMediaKitMode,
+      youtubeChannelIdForPanel,
+      youtubeMediaKitQueryValues.keyword,
+      youtubeMediaKitQueryValues.category,
+      youtubeMediaKitQueryValues.country,
+    ]);
 
     const getActiveSafeHandle = () => {
       const rawHandle = String(
@@ -3317,20 +4134,72 @@ export const DetailPanel = React.memo<DetailPanelProps>(
       try {
         setSendingInvite(true);
 
+        const recipientEmail = String(
+          editorPayload?.recipientEmail ||
+          editorPayload?.influencerEmail ||
+          editorPayload?.creatorEmail ||
+          editorPayload?.businessEmail ||
+          editorPayload?.contactEmail ||
+          editorPayload?.to ||
+          emailDraft?.toEmail ||
+          ''
+        ).trim();
+
+        const fromEmail = String(
+          editorPayload?.fromEmail ||
+          emailDraft?.fromEmail ||
+          ''
+        ).trim();
+
+        const fromName = String(
+          editorPayload?.fromName ||
+          emailDraft?.fromName ||
+          'CollabGlam'
+        ).trim();
+
+        const activeYoutubeChannelId = String(
+          youtubeChannelIdForPanel ||
+          youtubeChannelIdProp ||
+          queryChannelId ||
+          creatorUserId ||
+          ''
+        ).trim();
+
         const resp = await post<InvitationCreateResp>('/newinvitations/create', {
           handle: safeHandle,
           platform: normalizedPlatform,
           brandId,
           status: 'invited',
 
-          // New backend supports one influencer + multiple campaigns
           campaignIds,
 
-          // Store influencer userId in invitation
           userId: creatorUserId,
           modashUserId: creatorUserId,
 
           campaignName,
+
+          ...(activeYoutubeChannelId
+            ? {
+              channelId: activeYoutubeChannelId,
+              youtubeChannelId: activeYoutubeChannelId,
+            }
+            : {}),
+
+          ...(emailDraft?.missingEmailId
+            ? {
+              missingEmailId: emailDraft.missingEmailId,
+            }
+            : {}),
+
+          ...(recipientEmail
+            ? {
+              recipientEmail,
+              influencerEmail: recipientEmail,
+              creatorEmail: recipientEmail,
+              businessEmail: recipientEmail,
+              contactEmail: recipientEmail,
+            }
+            : {}),
 
           emailTemplate: editorPayload
             ? {
@@ -3338,8 +4207,8 @@ export const DetailPanel = React.memo<DetailPanelProps>(
               body: editorPayload.body,
               htmlBody: editorPayload.htmlBody,
               attachments: editorPayload.attachments,
-              fromEmail: emailDraft?.fromEmail || '',
-              fromName: emailDraft?.fromName || 'CollabGlam',
+              fromEmail,
+              fromName,
             }
             : undefined,
         });
@@ -3498,11 +4367,15 @@ export const DetailPanel = React.memo<DetailPanelProps>(
           fromName
         );
 
+        const resolvedToEmail = String(previewResp.toEmail || "").trim();
+
         const nextDraft: EmailDraftState = {
           campaignIds,
           fromEmail,
           fromName,
-          toLabel: String(previewResp.toEmail || displayHandle || safeHandle).trim(),
+          toLabel: String(resolvedToEmail || displayHandle || safeHandle).trim(),
+          toEmail: resolvedToEmail,
+          missingEmailId: previewResp.missingEmailId || null,
           subject: resolvedDraft.subject,
           initialBody: resolvedDraft.textBody,
           initialHtmlBody: resolvedDraft.htmlBody,
@@ -3991,8 +4864,8 @@ export const DetailPanel = React.memo<DetailPanelProps>(
       <>
         <div className="fixed inset-0 z-[90]">
           <div className="absolute inset-0 bg-black/30" />
-          <div className="absolute right-0 top-0 h-full w-full overflow-y-auto border-l bg-white shadow-2xl md:w-[72vw] xl:w-[64vw] rounded-none md:rounded-l-3xl">
-            <div className="sticky top-0 z-10 border-b bg-white/90 px-4 py-3 backdrop-blur">
+          <div className="absolute right-0 top-0 h-full w-full max-w-full overflow-y-auto border-l bg-white shadow-2xl md:w-full xl:w-full rounded-none md:rounded-l-3xl">
+            <div className="sticky top-0 overflow-visible border-b bg-white/90 px-4 py-3 backdrop-blur">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div className="flex min-w-0 flex-1 items-start gap-3">
                   <button
@@ -4049,7 +4922,7 @@ export const DetailPanel = React.memo<DetailPanelProps>(
                   </div>
 
                   {/* CTA row */}
-                  <div className="relative flex items-center">
+                  <div className="relative flex items-center overflow-visible">
                     <div className="inline-flex overflow-hidden rounded-xl bg-black text-white shadow-sm">
                       <button
                         onClick={(e) => {
@@ -4136,6 +5009,8 @@ Team CollabGlam`;
                               fromEmail: proxyEmail,
                               fromName: brandName,
                               toLabel: displayHandle || handle || '',
+                              toEmail: '',
+                              missingEmailId: null,
                               subject,
                               initialBody,
                               initialHtmlBody,
@@ -4228,134 +5103,145 @@ Team CollabGlam`;
 
 
             <div className="p-5">
-              {panelLoading ? <LoadingState /> : null}
-              {panelError ? <ErrorState error={panelError} /> : null}
+              {isYouTubeMediaKitMode ? (
+                <YouTubeMediaKitPanelContent
+                  loading={youtubeMediaKitLoading}
+                  error={youtubeMediaKitError}
+                  data={youtubeMediaKit}
+                  fallbackReport={selectedReport}
+                />
+              ) : (
+                <>
+                  {panelLoading ? <LoadingState /> : null}
+                  {panelError ? <ErrorState error={panelError} /> : null}
 
-              {!panelLoading && !panelError && !selectedReport ? (
-                <div className="mb-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
-                  No report data yet. Try refreshing data or selecting another creator.
-                </div>
-              ) : null}
+                  {!panelLoading && !panelError && !selectedReport ? (
+                    <div className="mb-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
+                      No report data yet. Try refreshing data or selecting another creator.
+                    </div>
+                  ) : null}
 
-              {!panelLoading && !panelError && selectedReport ? (
-                <div className="space-y-6">
-                  <CreatorHeader
-                    primaryReport={selectedReport}
-                    mediaKit={panelMediaKit}
-                    activePlan={plan}
-                    isVerified={selectedReport.isVerified}
-                    accountType={selectedReport.accountType}
-                    postsCount={selectedReport.postsCount}
-                  />
-
-                  <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+                  {!panelLoading && !panelError && selectedReport ? (
                     <div className="space-y-6">
-                      {hasSectionAccess('contactManagement') ? (
-                        <ContactManagementCard
-                          primaryReport={selectedReport}
-                          mediaKit={panelMediaKit}
-                          onCopy={handleCopy}
-                          connectedProfiles={activeAvailableProfiles}
-                          activePlatform={activePlatformKey}
-                          onPlatformSelect={handlePlatformSelect}
-                        />
-                      ) : null}
-                    </div>
-
-                    <div className="space-y-6">
-                      {hasSectionAccess('metricGrid') ? (
-                        <MetricsGrid metrics={metricCards} />
-                      ) : null}
-
-                      {hasSectionAccess('performanceTrend') ? (
-                        <PerformanceTrendCard
-                          key={`performance-${activePlatformKey}`}
-                          organicTrend={organicTrend}
-                          sponsoredTrend={sponsoredTrend}
-                          trendLabels={trendLabels}
-                          statHistory={statHistorySource.map(normalizeTrendPoint)}
-                          secondaryLabel={secondaryTrendLabel}
-                          primaryValue={avgLikes}
-                          secondaryValue={
-                            secondaryTrendLabel === 'Followers'
-                              ? toNumber(selectedReport?.followers)
-                              : avgViews
-                          }
-                        />
-                      ) : (
-                        <FeatureLockedCard title="Performance Trend" plan="starter" />
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-6">
-                    {hasSectionAccess('campaignHighlights') ? (
-                      <CampaignHighlightsCard items={campaignHighlights} />
-                    ) : (
-                      <FeatureLockedCard
-                        title="Campaign Performance Highlights"
-                        plan="pro"
+                      <CreatorHeader
+                        primaryReport={selectedReport}
+                        mediaKit={panelMediaKit}
+                        activePlan={plan}
+                        isVerified={selectedReport.isVerified}
+                        accountType={selectedReport.accountType}
+                        postsCount={selectedReport.postsCount}
                       />
-                    )}
 
-                    {hasSectionAccess('audienceIntelligence') ? (
-                      <AudienceIntelligenceCard
-                        ageData={audienceAge}
-                        genderData={audienceGender}
-                        topCountries={topCountries}
-                        credibilityScore={credibilityScore}
-                        topLanguages={topLanguages}
-                      />
-                    ) : (
-                      <FeatureLockedCard title="Audience Intelligence" plan="pro" />
-                    )}
+                      <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+                        <div className="space-y-6">
+                          {hasSectionAccess('contactManagement') ? (
+                            <ContactManagementCard
+                              primaryReport={selectedReport}
+                              mediaKit={panelMediaKit}
+                              onCopy={handleCopy}
+                              connectedProfiles={activeAvailableProfiles}
+                              activePlatform={activePlatformKey}
+                              onPlatformSelect={handlePlatformSelect}
+                            />
+                          ) : null}
+                        </div>
 
-                    <SelectionReasonCard
-                      loading={panelLoading && !selectedReport}
-                      reasons={selectionReasonItems}
-                      campaignTitle={activeCampaignForPanel?.campaignTitle}
-                    />
+                        <div className="space-y-6">
+                          {hasSectionAccess('metricGrid') ? (
+                            <MetricsGrid metrics={metricCards} />
+                          ) : null}
 
-                    <SuggestedRateCardBox
-                      loading={rateCardLoading}
-                      data={rateCardData}
-                      error={rateCardError}
-                      onGenerate={handleGenerateSuggestedRateCard}
-                    />
+                          {hasSectionAccess('performanceTrend') ? (
+                            <PerformanceTrendCard
+                              key={`performance-${activePlatformKey}`}
+                              organicTrend={organicTrend}
+                              sponsoredTrend={sponsoredTrend}
+                              trendLabels={trendLabels}
+                              statHistory={statHistorySource.map(normalizeTrendPoint)}
+                              secondaryLabel={secondaryTrendLabel}
+                              primaryValue={avgLikes}
+                              secondaryValue={
+                                secondaryTrendLabel === 'Followers'
+                                  ? toNumber(selectedReport?.followers)
+                                  : avgViews
+                              }
+                            />
+                          ) : (
+                            <FeatureLockedCard title="Performance Trend" plan="starter" />
+                          )}
+                        </div>
+                      </div>
 
-                    <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_420px]">
-                      {hasSectionAccess('recentPosts') ? (
-                        <RecentPostsTable posts={recentPosts.slice(0, 5)} />
-                      ) : (
-                        <FeatureLockedCard
-                          title="Recent Posts Performance"
-                          plan="free"
+                      <div className="space-y-6">
+                        {hasSectionAccess('campaignHighlights') ? (
+                          <CampaignHighlightsCard items={campaignHighlights} />
+                        ) : (
+                          <FeatureLockedCard
+                            title="Campaign Performance Highlights"
+                            plan="pro"
+                          />
+                        )}
+
+                        {hasSectionAccess('audienceIntelligence') ? (
+                          <AudienceIntelligenceCard
+                            ageData={audienceAge}
+                            genderData={audienceGender}
+                            topCountries={topCountries}
+                            credibilityScore={credibilityScore}
+                            topLanguages={topLanguages}
+                          />
+                        ) : (
+                          <FeatureLockedCard title="Audience Intelligence" plan="pro" />
+                        )}
+
+                        <SelectionReasonCard
+                          loading={panelLoading && !selectedReport}
+                          reasons={selectionReasonItems}
+                          campaignTitle={activeCampaignForPanel?.campaignTitle}
                         />
-                      )}
 
-                      {hasSectionAccess('popularContent') ? (
-                        <PopularContentPanel posts={popularPosts.slice(0, 2)} />
-                      ) : (
-                        <FeatureLockedCard title="Popular Content" plan="starter" />
-                      )}
+                        <SuggestedRateCardBox
+                          loading={rateCardLoading}
+                          data={rateCardData}
+                          error={rateCardError}
+                          onGenerate={handleGenerateSuggestedRateCard}
+                        />
+
+                        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_420px]">
+                          {hasSectionAccess('recentPosts') ? (
+                            <RecentPostsTable posts={recentPosts.slice(0, 5)} />
+                          ) : (
+                            <FeatureLockedCard
+                              title="Recent Posts Performance"
+                              plan="free"
+                            />
+                          )}
+
+                          {hasSectionAccess('popularContent') ? (
+                            <PopularContentPanel posts={popularPosts.slice(0, 2)} />
+                          ) : (
+                            <FeatureLockedCard title="Popular Content" plan="starter" />
+                          )}
+                        </div>
+
+                        {contractedCampaigns.length ? (
+                          <PastCollaborationsTable items={contractedCampaigns} />
+                        ) : null}
+
+                        {hasSectionAccess('lookalikeCreators') ? (
+                          <LookalikeCreatorsPanel
+                            items={lookalikeCreators}
+                            platform={activePlatformKey}
+                            onSelectLookalike={handleLookalikeSelect}
+                          />
+                        ) : (
+                          <FeatureLockedCard title="Lookalike Creators" plan="pro" />
+                        )}
+                      </div>
                     </div>
-
-                    {contractedCampaigns.length ? (
-                      <PastCollaborationsTable items={contractedCampaigns} />
-                    ) : null}
-
-                    {hasSectionAccess('lookalikeCreators') ? (
-                      <LookalikeCreatorsPanel
-                        items={lookalikeCreators}
-                        platform={activePlatformKey}
-                        onSelectLookalike={handleLookalikeSelect}
-                      />
-                    ) : (
-                      <FeatureLockedCard title="Lookalike Creators" plan="pro" />
-                    )}
-                  </div>
-                </div>
-              ) : null}
+                  ) : null}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -4364,6 +5250,7 @@ Team CollabGlam`;
           open={emailEditorOpen}
           onClose={() => setEmailEditorOpen(false)}
           toLabel={emailDraft?.toLabel || displayHandle || ''}
+          toEmail={emailDraft?.toEmail || ''}
           fromName={emailDraft?.fromName || 'CollabGlam'}
           fromEmail={emailDraft?.fromEmail || ''}
           toAvatar={selectedReport?.picture || primaryReport?.picture || ''}

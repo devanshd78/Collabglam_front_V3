@@ -178,7 +178,7 @@ const ROLES = [
   "Other",
 ];
 
-const PLATFORM_CHIPS = ["Instagram", "TikTok", "YouTube"].map((p) => ({ label: p, value: p }));
+const PLATFORM_CHIPS = ["YouTube"].map((p) => ({ label: p, value: p }));
 
 type QA = { question: string; answers: string[] };
 
@@ -757,20 +757,15 @@ export default function BrandOnboardingPage() {
             </span>
           </Link>
 
-          <Link
-            href="/influencer/login"
-            className={cn(
-              buttonVariants({ variant: "outline", size: "sm" }),
-              "!my-0 rounded-m px-l border-[color:var(--Border-Primary,#B3B3B3)] text-neutral-600"
-            )}
-          >
-            Join as a Influencer
-          </Link>
         </div>
       </header>
-
       {/* Body */}
-      <main className={cn("max-w-full flex-1 min-h-0 overflow-y-auto", step === "brandOnboarding" ? "py-[24px]" : "py-[20px]")}>
+      <main
+        className={cn(
+          "max-w-full flex-1 min-h-0 overflow-y-auto",
+          step === "brandOnboarding" ? "py-[8px] sm:py-[16px]" : "py-[20px]"
+        )}
+      >
         <div className={cn("grid min-h-0 gap-[40px]", step === "brandOnboarding" ? "items-start justify-items-center" : "h-full items-stretch lg:grid-cols-2")}>
           {/* LEFT */}
           {step !== "brandOnboarding" && (
@@ -803,7 +798,13 @@ export default function BrandOnboardingPage() {
           )}
 
           {/* RIGHT ✅ top aligned with 84px from top */}
-          <section className={cn("order-2 flex px-[20px] justify-center w-full items-start pt-[84px]", step !== "brandOnboarding" && "lg:min-h-[calc(100svh-114px)]")}>
+          <section
+            className={cn(
+              "order-2 flex px-[16px] sm:px-[20px] justify-center w-full items-start",
+              step === "brandOnboarding" ? "pt-0" : "pt-[84px]",
+              step !== "brandOnboarding" && "lg:min-h-[calc(100svh-114px)]"
+            )}
+          >
             <div className="w-full max-w-[520px]">
               {/* Brand Alias */}
               {step === "brandAlias" && (
@@ -866,9 +867,9 @@ export default function BrandOnboardingPage() {
                         </div>
                       </div>
 
-                      <div className="min-h-0 flex flex-col h-[min(720px,calc(100svh-140px))] overflow-hidden">
-                        <div className="min-h-0 flex-1 overflow-y-auto">
-                          <div className="px-6 pt-5">
+                      <div className="min-h-0 flex flex-col max-h-[calc(100svh-92px)] sm:max-h-[min(720px,calc(100svh-112px))] overflow-y-auto overscroll-contain">
+                        <div className="min-h-0">
+                          <div className="px-5 sm:px-6 pt-3 sm:pt-5">
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
@@ -884,17 +885,17 @@ export default function BrandOnboardingPage() {
                               </div>
                             </div>
 
-                            <div className="mt-6">
+                            <div className="mt-4">
                               <h1 className="cg-heading">{current.title}</h1>
                               <p className="mt-l cg-description">{current.subtitle}</p>
                             </div>
 
-                            <div className="px-[20px] mt-[44px] pb-10">{current.content}</div>
+                            <div className="px-0 sm:px-[20px] mt-[24px] sm:mt-[32px] pb-4">{current.content}</div>
                           </div>
                         </div>
 
                         {/* Fixed footer */}
-                        <div className="shrink-0 bg-white px-6 pt-6 pb-10">
+                        <div className="shrink-0 bg-white px-5 sm:px-6 pt-2 sm:pt-4 pb-4 sm:pb-6">
                           {formError ? (
                             <p className="mb-3 text-[12px] leading-[16px] text-error-500">{formError}</p>
                           ) : null}
@@ -903,7 +904,7 @@ export default function BrandOnboardingPage() {
                             variant="solid"
                             size="lg"
                             className={cn(
-                              "w-full h-[58px] rounded-[14px]",
+                              "w-full h-[50px] sm:h-[56px] rounded-[14px]",
                               "disabled:opacity-100 disabled:bg-neutral-200 disabled:text-neutral-400"
                             )}
                             onClick={onboardNext}
@@ -915,7 +916,7 @@ export default function BrandOnboardingPage() {
                           <Button
                             variant="raised"
                             size="lg"
-                            className="w-full h-[58px] rounded-[14px] shadow-none mt-m"
+                            className="w-full h-[48px] sm:h-[54px] rounded-[14px] shadow-none mt-2 sm:mt-m"
                             onClick={onboardSkip}
                             disabled={isLoading}
                           >
