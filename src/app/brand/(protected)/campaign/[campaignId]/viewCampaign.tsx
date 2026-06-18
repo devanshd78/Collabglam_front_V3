@@ -29,12 +29,10 @@ import {
   CalendarDots,
   CalendarX,
   Wallet,
+  EnvelopeOpen,
   Eye,
-  FolderSimplePlus,
-  AddressBook,
   Link,
   Trash,
-  NewspaperIcon,
   TrashIcon,
   DotsThreeIcon,
   CaretRightIcon,
@@ -384,14 +382,154 @@ interface CampaignStatusDropdownProps {
   campaignId: string;
   currentStatus: string;
   onStatusChange?: (newStatus: string) => void;
+  forceLocked?: boolean;
 }
 
-interface CampaignStatusDropdownProps {
-  brandId: string;
-  campaignId: string;
-  currentStatus: string;
-  onStatusChange?: (newStatus: string) => void;
-  forceLocked?: boolean;
+
+function CampaignStatusConfirmModal({
+  open,
+  loading,
+  targetStatus,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  loading?: boolean;
+  targetStatus: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const isResume = normalizeCampaignStatusValue(targetStatus) === "active";
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !loading) {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open, loading, onClose]);
+
+  if (!mounted || !open) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/30 px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="campaign-status-modal-title"
+      onClick={() => {
+        if (!loading) onClose();
+      }}
+    >
+      <div
+        className="flex w-full max-w-[47.5rem] flex-col overflow-hidden rounded-[1rem] bg-white shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between self-stretch border-b border-[#E6E6E6] px-4 py-3">
+          <h2
+            id="campaign-status-modal-title"
+            className="m-0 text-[1.25rem] font-semibold leading-[1.75rem] tracking-normal text-[#1A1A1A]"
+            style={{ fontFamily: "var(--Font-Family-Inter, Inter)" }}
+          >
+            {isResume
+              ? "Resume Creator Applications"
+              : "Are you sure you want to pause this campaign?"}
+          </h2>
+
+          <button
+            type="button"
+            aria-label="Close"
+            disabled={loading}
+            onClick={onClose}
+            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[0.5rem] text-[1.75rem] font-light leading-none text-[#1A1A1A] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="flex items-center justify-center gap-2.5 self-stretch px-4 py-10">
+          {isResume ? (
+            <p
+              className="m-0 w-full text-[1rem] font-medium leading-[1.5rem] tracking-normal text-[#969696]"
+              style={{ fontFamily: "var(--Font-Family-Inter, Inter)" }}
+            >
+              Resuming this campaign will{" "}
+              <span className="font-semibold text-[#1A1A1A]">
+                reopen creator discovery
+              </span>{" "}
+              and{" "}
+              <span className="font-semibold text-[#1A1A1A]">
+                applications
+              </span>
+              . Existing creators will retain access to all campaign activities
+              and deliverables.
+            </p>
+          ) : (
+            <p
+              className="m-0 w-full text-[1rem] font-medium leading-[1.5rem] tracking-normal text-[#969696]"
+              style={{ fontFamily: "var(--Font-Family-Inter, Inter)" }}
+            >
+              New creators will no longer be able to{" "}
+              <span className="font-semibold text-[#1A1A1A]">
+                discover or apply
+              </span>{" "}
+              to this campaign. Existing creators will retain access and can
+              continue working on their assigned milestones and deliverables.
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 self-stretch border-y border-[#E6E6E6] px-4 py-3">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={onClose}
+            className="flex h-11 cursor-pointer items-center justify-center px-2 text-[0.75rem] font-medium leading-5 text-[#1A1A1A] disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ fontFamily: "var(--Font-Family-Inter, Inter)" }}
+          >
+            Oh sorry don’t do
+          </button>
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={onConfirm}
+            className={[
+              "flex h-11 cursor-pointer items-center justify-center rounded-[0.5rem] px-6 text-[0.75rem] font-semibold leading-5 disabled:cursor-not-allowed disabled:opacity-60",
+              isResume
+                ? "bg-[#1A1A1A] text-white"
+                : "bg-[#FCEEEC] text-[#E35141]",
+            ].join(" ")}
+            style={{ fontFamily: "var(--Font-Family-Inter, Inter)" }}
+          >
+            {loading
+              ? "Updating..."
+              : isResume
+                ? "Resume campaign"
+                : "I know that"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
 }
 
 export function CampaignStatusDropdown({
@@ -405,6 +543,8 @@ export function CampaignStatusDropdown({
     normalizeCampaignStatusValue(currentStatus || "draft")
   );
   const [loading, setLoading] = useState(false);
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<string>("");
 
   useEffect(() => {
     if (currentStatus) {
@@ -424,18 +564,18 @@ export function CampaignStatusDropdown({
   const isLocked =
     forceLocked || value === "completed" || dropdownOptions.length === 0;
 
-  const handleChange = async (newValue: string | null) => {
-    if (!newValue || newValue === value || loading || forceLocked) return;
-
+  const updateCampaignStatus = async (newStatus: string) => {
+    const normalizedNewStatus = normalizeCampaignStatusValue(newStatus);
     const previous = value;
-    setValue(newValue);
+
+    setValue(normalizedNewStatus);
     setLoading(true);
 
     try {
       const resp: any = await apiCampaignUpdateStatus({
         brandId,
         campaignId,
-        status: newValue as any,
+        status: normalizedNewStatus as any,
       });
 
       const msg =
@@ -445,15 +585,53 @@ export function CampaignStatusDropdown({
         "Status updated";
 
       toast({ icon: "success", title: msg });
-      onStatusChange?.(newValue);
+      onStatusChange?.(normalizedNewStatus);
+
+      return true;
     } catch (err: unknown) {
       setValue(previous);
       toast({
         icon: "error",
         title: getApiErrorMessage(err, "Status update failed"),
       });
+
+      return false;
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleChange = async (newValue: string | null) => {
+    if (!newValue || loading || forceLocked) return;
+
+    const normalizedNewValue = normalizeCampaignStatusValue(newValue);
+
+    if (normalizedNewValue === value) return;
+
+    if (normalizedNewValue === "paused" || normalizedNewValue === "active") {
+      setPendingStatus(normalizedNewValue);
+      setStatusModalOpen(true);
+      return;
+    }
+
+    await updateCampaignStatus(normalizedNewValue);
+  };
+
+  const closeStatusModal = () => {
+    if (loading) return;
+
+    setStatusModalOpen(false);
+    setPendingStatus("");
+  };
+
+  const confirmStatusChange = async () => {
+    if (!pendingStatus) return;
+
+    const updated = await updateCampaignStatus(pendingStatus);
+
+    if (updated) {
+      setStatusModalOpen(false);
+      setPendingStatus("");
     }
   };
 
@@ -467,14 +645,15 @@ export function CampaignStatusDropdown({
   }
 
   return (
-    <Combobox value={value} onValueChange={handleChange}>
-      <ComboboxTrigger className="inline-flex items-center gap-1.5 h-8 px-2 bg-transparent text-sm font-medium text-[#1A1A1A]">
-        <StatusDot dot={currentMeta.dot} ring={currentMeta.ring} />
-        <span className="capitalize">{value}</span>
-      </ComboboxTrigger>
+    <>
+      <Combobox value={value} onValueChange={handleChange}>
+        <ComboboxTrigger className="inline-flex items-center gap-1.5 h-8 px-2 bg-transparent text-sm font-medium text-[#1A1A1A]">
+          <StatusDot dot={currentMeta.dot} ring={currentMeta.ring} />
+          <span className="capitalize">{value}</span>
+        </ComboboxTrigger>
 
-      <ComboboxContent
-        className="
+        <ComboboxContent
+          className="
           w-[13.6875rem]
           max-h-[16.25rem]
           rounded-[0.75rem]
@@ -482,24 +661,33 @@ export function CampaignStatusDropdown({
           py-[1rem]
           px-[0.75rem]
         "
-      >
-        <ComboboxList>
-          {dropdownOptions.map((s) => (
-            <ComboboxItem
-              key={s.label}
-              value={s.label.toLowerCase()}
-              className="capitalize rounded-lg px-3 py-2"
-              showIndicator={false}
-            >
-              <div className="flex items-center gap-2 w-full text-sm leading-5 font-medium">
-                <StatusDot dot={s.dot} ring={s.ring} />
-                {s.label}
-              </div>
-            </ComboboxItem>
-          ))}
-        </ComboboxList>
-      </ComboboxContent>
-    </Combobox>
+        >
+          <ComboboxList>
+            {dropdownOptions.map((s) => (
+              <ComboboxItem
+                key={s.label}
+                value={s.label.toLowerCase()}
+                className="capitalize rounded-lg px-3 py-2"
+                showIndicator={false}
+              >
+                <div className="flex items-center gap-2 w-full text-sm leading-5 font-medium">
+                  <StatusDot dot={s.dot} ring={s.ring} />
+                  {s.label}
+                </div>
+              </ComboboxItem>
+            ))}
+          </ComboboxList>
+        </ComboboxContent>
+      </Combobox>
+
+      <CampaignStatusConfirmModal
+        open={statusModalOpen}
+        loading={loading}
+        targetStatus={pendingStatus}
+        onClose={closeStatusModal}
+        onConfirm={confirmStatusChange}
+      />
+    </>
   );
 }
 
@@ -1098,24 +1286,48 @@ function RecommendedActionItems({
   );
 }
 
+function isFullyManagedCampaign(c: any): boolean {
+  const role = String(c?.createdBy?.role ?? "").trim().toLowerCase();
+  const userModel = String(c?.createdBy?.userModel ?? "").trim().toLowerCase();
+  const managementType = String(c?.managementType ?? "").trim().toLowerCase();
+
+  return (
+    role === "admin" ||
+    Boolean(c?.byAdmin) ||
+    Boolean(c?.isAdminCampaign) ||
+    Boolean(c?.createdBy?.isAdmin) ||
+    Boolean(c?.isFullyManaged) ||
+    Boolean(c?.fullyManaged) ||
+    managementType === "fully_managed" ||
+    managementType === "fully managed" ||
+    (role === "brand" &&
+      userModel === "brand" &&
+      (Boolean(c?.isFullyManaged) || Boolean(c?.fullyManaged)))
+  );
+}
+
+function getCampaignStatusForEdit(c: any): string {
+  return normalizeCampaignStatusValue(
+    c?.status ??
+    c?.campaignStatus ??
+    c?.publishStatus ??
+    c?.details?.status ??
+    c?.details?.campaignStatus ??
+    ""
+  );
+}
+
 function canShowEditCampaign(c: any): boolean {
-  const status = String(c?.status ?? "").trim().toLowerCase();
+  const status = normalizeCampaignStatusValue(
+    c?.status ??
+    c?.campaignStatus ??
+    c?.publishStatus ??
+    c?.details?.status ??
+    c?.details?.campaignStatus ??
+    ""
+  );
 
-  if (status === "draft") return true;
-
-  if (status === "active" || status === "scheduled") {
-    const startAtRaw = c?.startAt ?? c?.details?.startAt;
-    if (!startAtRaw) return true;
-
-    const startAt = new Date(startAtRaw);
-    if (Number.isNaN(startAt.getTime())) return true;
-
-    const now = new Date();
-
-    return startAt.getTime() > now.getTime();
-  }
-
-  return false;
+  return status === "active" || status === "paused";
 }
 
 function ImagePreviewModal({
@@ -2236,7 +2448,39 @@ export default function ViewCampaignPage() {
                 currentStatus={statusText}
                 forceLocked={isAdminCreatedCampaign}
                 onStatusChange={(newStatus) => {
-                  setDoc((prev: any) => (prev ? { ...prev, status: newStatus } : prev));
+                  setDoc((prev: any) => {
+                    if (!prev) return prev;
+
+                    if (prev?.data?.doc) {
+                      return {
+                        ...prev,
+                        status: newStatus,
+                        data: {
+                          ...prev.data,
+                          doc: {
+                            ...prev.data.doc,
+                            status: newStatus,
+                          },
+                        },
+                      };
+                    }
+
+                    if (prev?.doc) {
+                      return {
+                        ...prev,
+                        status: newStatus,
+                        doc: {
+                          ...prev.doc,
+                          status: newStatus,
+                        },
+                      };
+                    }
+
+                    return {
+                      ...prev,
+                      status: newStatus,
+                    };
+                  });
                 }}
               />
 
@@ -2245,7 +2489,21 @@ export default function ViewCampaignPage() {
                   <Button
                     variant="raised"
                     size="sm"
-                    className="my-0 h-8 rounded-lg border border-[#1A1A1A] bg-white px-2 shadow-none gap-2"
+                    className="
+                      my-0
+                      flex
+                      h-8
+                      items-center
+                      justify-center
+                      gap-1
+                      rounded-[0.5rem]
+                      border
+                      border-[#E6E6E6]
+                      bg-white
+                      px-3
+                      shadow-none
+                      hover:bg-[#F7F7F7]
+                    "
                     rightIcon={<UsersIcon weight="bold" style={{ width: "0.875rem", height: "0.875rem" }} />}
                     onClick={goToBrowseInfluencer}
                   >
@@ -2257,6 +2515,38 @@ export default function ViewCampaignPage() {
                         Influencers
                       </span>
                     </>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="raised"
+                    size="sm"
+                    aria-label="Invite influencer"
+                    onClick={goToBrowseInfluencer}
+                    className="
+                      my-0
+                      flex
+                      h-8
+                      w-8
+                      items-center
+                      justify-center
+                      rounded-[0.75rem]
+                      border
+                      border-[#E6E6E6]
+                      bg-white
+                      p-2
+                      shadow-none
+                      hover:bg-[#F7F7F7]
+                    "
+                  >
+                    <EnvelopeOpen
+                      weight="regular"
+                      style={{
+                        width: "1rem",
+                        height: "1rem",
+                        color: "#1A1A1A",
+                      }}
+                    />
                   </Button>
                 </>
               ) : (
@@ -2354,7 +2644,7 @@ export default function ViewCampaignPage() {
 
       <div className="w-full">
         <div className="mt-3 flex flex-col items-start gap-6 self-stretch">
-          <div className="flex w-full items-start justify-between self-stretch">
+          <div className="flex w-full items-center justify-between self-stretch">
             <div
               className="text-[#1A1A1A] text-[1.25rem] font-semibold leading-[1.75rem]"
               style={{
@@ -2365,11 +2655,26 @@ export default function ViewCampaignPage() {
               Overview
             </div>
 
-            {showEditButton && !isAdminCreatedCampaign ? (
+            {showEditButton ? (
               <Button
                 variant="raised"
                 size="sm"
-                className="my-0 p-0 h-auto bg-transparent shadow-none hover:bg-transparent active:bg-transparent gap-2"
+                className="
+      my-0
+      ml-auto
+      flex
+      items-center
+      justify-center
+      gap-2
+      self-stretch
+      rounded-[0.75rem]
+      bg-transparent
+      px-2
+      py-0
+      shadow-none
+      hover:bg-[#F7F7F7]
+      active:bg-[#F7F7F7]
+    "
                 rightIcon={
                   <PencilSimple
                     weight="bold"

@@ -1214,6 +1214,40 @@ export default function EditCampaignPage() {
     const ageSearchProps = useSearchProps(lists.search.ageRanges.value, lists.search.ageRanges.onChange);
     const hashtagSearchProps = useSearchProps(lists.search.preferredHashtags.value, lists.search.preferredHashtags.onChange);
 
+    const [productFilePreviewUrls, setProductFilePreviewUrls] = useState<string[]>([]);
+
+    useEffect(() => {
+        const files = form.productFiles ?? [];
+
+        if (!files.length) {
+            setProductFilePreviewUrls([]);
+            return;
+        }
+
+        const urls = files.map((file) => URL.createObjectURL(file));
+        setProductFilePreviewUrls(urls);
+
+        return () => {
+            urls.forEach((url) => URL.revokeObjectURL(url));
+        };
+    }, [form.productFiles]);
+
+    const previewProductImages = useMemo(
+        () => [
+            ...(existingProductImages ?? []).map(getImageSrc).filter(Boolean),
+            ...productFilePreviewUrls,
+        ],
+        [existingProductImages, productFilePreviewUrls]
+    );
+
+    const previewForm = useMemo(
+        () => ({
+            ...form,
+            productImages: previewProductImages,
+        }),
+        [form, previewProductImages]
+    );
+
     const doUpdate = useCallback(async () => {
         setSubmitAttempted(true);
         setServerFieldErrors({});
@@ -1792,7 +1826,7 @@ export default function EditCampaignPage() {
                             </div>
 
                             <div className="flex-1 min-h-0 pb-10 px-6 xl:px-10">
-                                <ManualPreviewCardStack form={form} meta={previewMeta} />
+                                <ManualPreviewCardStack form={previewForm} meta={previewMeta} />
                             </div>
                         </aside>
                     ) : null}
@@ -1803,7 +1837,7 @@ export default function EditCampaignPage() {
                         title="Card Preview"
                         widthPx={LAYOUT.manualPreviewWidth}
                     >
-                        <ManualPreviewCardStack form={form} meta={previewMeta} />
+                        <ManualPreviewCardStack form={previewForm} meta={previewMeta} />
                     </SideModalPreview>
                 </div>
             </div>

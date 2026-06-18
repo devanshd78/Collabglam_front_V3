@@ -2803,7 +2803,7 @@ function CreateManualScreen({
 
           {previewOpen ? (
             <aside className="hidden lg:flex min-h-0 flex-col border border-neutral-200 bg-brand-50" style={{ width: effectivePreviewWidth }}>
-              <div className="shrink-0 flex items-center px-6 xl:px-10 pt-10 gap-2">
+              <div className="shrink-0 flex items-center px-6 xl:px-10 pt-6 gap-2">
                 <div className="text-[20px] leading-[28px] font-semibold tracking-[0]" style={{ color: "var(--Text-Primary, #1A1A1A)" }}>
                   Card Preview
                 </div>
@@ -2826,7 +2826,7 @@ function CreateManualScreen({
                 </div>
               </div>
 
-              <div className="flex-1 pb-60 px-6 xl:px-10">
+              <div className="flex-1 pb-60 px-6 xl:px-10 pt-4">
                 <ManualPreviewCardStack
                   form={previewForm as any}
                   meta={previewMeta}

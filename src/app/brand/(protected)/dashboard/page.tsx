@@ -280,6 +280,16 @@ type CampaignListRow = {
   activeInfluencers: ActiveInfluencerRow[];
 };
 
+type EngagedInfluencerModalRow = {
+  id: string;
+  influencerId: string;
+  name: string;
+  handle?: string;
+  profileImage?: string;
+  followers?: string | number;
+  campaignName: string;
+};
+
 type PaymentHistoryApiRow = {
   paymentType: "plan" | "milestone" | string;
   orderId?: string;
@@ -757,6 +767,7 @@ export default function BrandDashboardHome() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [dateFilterMode, setDateFilterMode] = useState<DashboardDateFilter>("date");
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [isEngagedInfluencersModalOpen, setIsEngagedInfluencersModalOpen] = useState(false);
 
   const calendarPopoverRef = useRef<HTMLDivElement | null>(null);
 
@@ -1175,6 +1186,21 @@ export default function BrandDashboardHome() {
       });
   }, [data?.campaigns, brandAppliedData?.campaigns, dateFilterMode, selectedDate]);
 
+  const engagedInfluencerModalRows = useMemo<EngagedInfluencerModalRow[]>(() => {
+    return campaignListRows.flatMap((campaign) =>
+      campaign.activeInfluencers.map((influencer, index) => ({
+        id:
+          `${campaign.id}-${influencer.influencerId || influencer.contractMongoId || influencer.contractId || index}`,
+        influencerId: influencer.influencerId || "",
+        name: influencer.name || "Influencer",
+        handle: influencer.handle || "",
+        profileImage: influencer.profileImage || "",
+        followers: influencer.followers || 0,
+        campaignName: campaign.title || "Campaign",
+      }))
+    );
+  }, [campaignListRows]);
+
   const workingInfluencers = useMemo<ActiveInfluencerRow[]>(() => {
     const map = new Map<string, ActiveInfluencerRow>();
 
@@ -1260,11 +1286,11 @@ export default function BrandDashboardHome() {
 
   const campaignMetricValue = hasSelectedDateCampaignData
     ? String(campaignListRows.length || 0).padStart(2, "0")
-    : "NA";
+    : "00";
 
   const workingInfluencerMetricValue = hasSelectedDateCampaignData
     ? Number(workingInfluencers.length || 0).toLocaleString()
-    : "NA";
+    : "00";
 
   const campaignCardRightLabel =
     dateFilterMode === "all"
@@ -1286,6 +1312,7 @@ export default function BrandDashboardHome() {
       value: workingInfluencerMetricValue,
       subtitle: dateFilterMode === "all" ? "All-time working influencers" : "Working influencers",
       avatarUsers: hasSelectedDateCampaignData ? workingInfluencers : [],
+      onClick: () => setIsEngagedInfluencersModalOpen(true),
     },
     {
       title: "Escrow Amount",
@@ -1483,7 +1510,7 @@ export default function BrandDashboardHome() {
             <div className="flex h-[3.75rem] w-full items-center overflow-hidden rounded-lg border border-[#E6E6E6] bg-white">
               {quickActions.map((action, index) => (
                 <React.Fragment key={action.label}>
-                  <div className="flex h-full min-w-0 flex-1 items-center justify-between bg-white px-5">
+                  <div className="group flex h-full min-w-0 flex-1 items-center justify-between bg-white px-5 transition hover:bg-[#F9F9F9] cursor-pointer">
                     <span className="flex items-center gap-2 font-inter text-[1rem] font-medium leading-6 text-[#1A1A1A]">
                       {action.icon}
                       {action.label}
@@ -1492,10 +1519,20 @@ export default function BrandDashboardHome() {
                     <button
                       type="button"
                       onClick={action.onClick}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E6E6E6] transition hover:bg-[#F7F7F7] cursor-pointer"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E6E6E6] bg-white transition cursor-pointer group-hover:bg-[#F7F7F7]"
                       aria-label={action.label}
                     >
-                      <ArrowRight size={16} weight="bold" />
+                      <ArrowRight
+                        size={16}
+                        weight="bold"
+                        className="block group-hover:hidden"
+                      />
+
+                      <ArrowUpRight
+                        size={16}
+                        weight="bold"
+                        className="hidden group-hover:block"
+                      />
                     </button>
                   </div>
 
@@ -1546,6 +1583,12 @@ export default function BrandDashboardHome() {
           </div>
 
           <PaymentHistorySection rows={paymentHistoryRows} />
+          {isEngagedInfluencersModalOpen ? (
+            <EngagedInfluencersModal
+              rows={engagedInfluencerModalRows}
+              onClose={() => setIsEngagedInfluencersModalOpen(false)}
+            />
+          ) : null}
         </main>
       </div>
     </SkeletonProvider>
@@ -2302,8 +2345,6 @@ const PaymentHistorySection = ({ rows }: { rows: PaymentHistoryRow[] }) => {
                         </p>
 
                         <p className="truncate font-inter text-[0.75rem] font-normal leading-4 text-[#B8B8B8]">
-                          ID {row.transactionId}
-                          {row.dateLabel ? <span className="mx-2">|</span> : null}
                           {row.dateLabel}
                         </p>
                       </div>
@@ -2332,6 +2373,109 @@ const PaymentHistorySection = ({ rows }: { rows: PaymentHistoryRow[] }) => {
         </div>
       </div>
     </section>
+  );
+};
+
+const EngagedInfluencersModal = ({
+  rows,
+  onClose,
+}: {
+  rows: EngagedInfluencerModalRow[];
+  onClose: () => void;
+}) => {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="All Engaged Influencer"
+        onClick={(event) => event.stopPropagation()}
+        className="flex h-[34rem] w-[50.375rem] max-w-[calc(100vw-2rem)] flex-col items-end justify-center gap-[2.1875rem] overflow-hidden rounded-[1rem] bg-white px-8 pt-8 shadow-[0_24px_40px_-4px_rgba(0,0,0,0.10),0_0_12px_0_rgba(0,0,0,0.08)]"
+      >
+        <div className="flex w-full shrink-0 items-center justify-between gap-4">
+          <h3 className="font-inter text-[1.25rem] font-medium leading-7 tracking-[0] text-[#1A1A1A]">
+            All Engaged Influencer
+          </h3>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[#1A1A1A] transition hover:bg-[#F7F7F7] cursor-pointer"
+            aria-label="Close"
+          >
+            <X size={18} weight="bold" />
+          </button>
+        </div>
+
+        <div className="h-[25.75rem] w-full overflow-y-auto pr-2 [scrollbar-width:thin] [scrollbar-color:#E6E6E6_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:min-h-[2.833rem] [&::-webkit-scrollbar-thumb]:rounded-[6.25rem] [&::-webkit-scrollbar-thumb]:bg-[#E6E6E6]">
+          {!rows.length ? (
+            <div className="flex h-full items-center justify-center text-center font-inter text-[0.875rem] text-[#969696]">
+              No engaged influencers found.
+            </div>
+          ) : (
+            <div className="flex w-full flex-col">
+              {rows.map((row) => (
+                <div
+                  key={row.id}
+                  className="flex min-h-[6rem] items-start gap-3 self-stretch border-t-0 border-b border-[#E6E6E6] bg-white px-8 py-4"
+                >
+                  <AvatarBox
+                    src={row.profileImage}
+                    name={row.name}
+                    sizeClass="h-16 w-16"
+                    roundedFull
+                    darkFallback
+                  />
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 items-baseline gap-2">
+                      <p className="line-clamp-1 max-w-[10rem] overflow-hidden text-ellipsis font-inter text-[1.25rem] font-semibold leading-7 tracking-[0] text-[#1A1A1A]">
+                        {row.name}
+                      </p>
+
+                      <span className="line-clamp-1 max-w-[8.75rem] overflow-hidden text-ellipsis font-inter text-[1rem] font-normal leading-6 tracking-[0] text-[#969696]">
+                        {row.handle || "@handle"}
+                      </span>
+                    </div>
+
+                    <p className="mt-1 flex min-w-0 flex-wrap items-center gap-1 font-inter text-[0.875rem] font-normal leading-5">
+                      <span className="text-[#1A1A1A]">
+                        {formatFollowers(row.followers)}
+                      </span>
+
+                      <span className="text-[#969696]">Followers</span>
+
+                      <span className="text-[#969696]">·</span>
+
+                      <span className="line-clamp-1 max-w-[22rem] overflow-hidden text-ellipsis text-[#969696]">
+                        {row.campaignName}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
 

@@ -321,20 +321,16 @@ function resolveDateParams(df: DateFilterValue): {
 function canShowEditCampaign(c: any) {
   const status = String(c?.status ?? "").trim().toLowerCase();
 
-  if (status === "draft") return true;
+  if (isFullyManagedCampaign(c)) return false;
 
-  if (status === "active" || status === "scheduled") {
-    const startAtRaw = c?.startAt;
-    if (!startAtRaw) return true;
+  const hiddenStatuses = new Set([
+    "completed",
+    "complete",
+    "expired",
+    "expire",
+  ]);
 
-    const startAt = new Date(startAtRaw);
-    if (Number.isNaN(startAt.getTime())) return true;
-
-    const now = new Date();
-    return startAt.getTime() > now.getTime();
-  }
-
-  return false;
+  return !hiddenStatuses.has(status);
 }
 
 function isDraftCampaign(c: any) {
@@ -1217,7 +1213,7 @@ export default function CampaignListPage({
                     Manage Influencer
                   </Button>
 
-                  {showEditButton && !fullyManaged ? (
+                  {showEditButton ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -1347,7 +1343,7 @@ min-[981px]:w-auto"
             onMouseDown={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           >
-            {showEditButton && !fullyManaged ? (
+            {showEditButton ? (
               <Button
                 type="button"
                 variant="outline"
