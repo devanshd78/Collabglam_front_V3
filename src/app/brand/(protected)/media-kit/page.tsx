@@ -3,11 +3,13 @@
 import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ArrowLeft,
   BarChart3,
   CalendarDays,
   CheckCircle2,
   Globe,
   Heart,
+  Lock,
   Mail,
   PlayCircle,
   ShieldCheck,
@@ -35,7 +37,6 @@ type BrandMediaKitData = {
     creatorName?: string;
     channelName?: string;
     profilePhoto?: string;
-    bannerImage?: string;
     category?: string;
     creatorTier?: string;
     primaryLanguage?: string;
@@ -115,6 +116,7 @@ type BrandMediaKitData = {
   };
   contact?: {
     hasContactInfo?: boolean;
+    email?: string;
     maskedEmail?: string;
     website?: string;
     socialLinks?: { platform: string; url: string }[];
@@ -189,10 +191,19 @@ function getCleanSummary(value?: string) {
   return String(value || "")
     .replace(/\bYouTube creator\b/gi, "creator")
     .replace(/\bYoutube creator\b/gi, "creator")
-    .replace(/\bcampaign fit score\b/gi, "match score")
-    .replace(/\bcampaign-fit score\b/gi, "match score")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function maskEmailForFrontend(value?: string) {
+  const email = String(value || "").trim();
+  if (!email || !email.includes("@")) return "";
+
+  const [localPart, ...domainParts] = email.split("@");
+  const domain = domainParts.join("@").trim();
+  if (!localPart || !domain) return "";
+
+  return `xxxxxxxx@${domain}`;
 }
 
 function proxyImageUrl(url?: string) {
@@ -200,18 +211,6 @@ function proxyImageUrl(url?: string) {
   if (!raw) return "";
   if (!/^https?:\/\//i.test(raw)) return raw;
   return getApiUrl(`/youtube-data/image-proxy?url=${encodeURIComponent(raw)}`);
-}
-
-function getHeroBackgroundImage(data?: BrandMediaKitData | null) {
-  const banner = data?.creatorOverview?.bannerImage;
-  if (banner) return banner;
-
-  const videoImage =
-    data?.topPerformingVideos?.find((video) => video.thumbnail)?.thumbnail ||
-    data?.recentVideos?.find((video) => video.thumbnail)?.thumbnail ||
-    "";
-
-  return videoImage || data?.creatorOverview?.profilePhoto || "";
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -384,30 +383,41 @@ function MediaKitPageContent() {
   const prediction = data?.campaignPrediction;
   const contact = data?.contact;
   const recommendation = data?.collabGlamRecommendation;
-  const heroBackgroundImage = getHeroBackgroundImage(data);
   const topVideos = data?.topPerformingVideos || [];
   const recentVideos = data?.recentVideos || [];
-  const breadcrumbSourceLabel = returnTo === "invitation" ? "Invite creators" : "Browse influencers";
-  const breadcrumbSourceHref = returnTo === "invitation" && campaignId
-    ? `/brand/influencer-invitation?q=active&campaignId=${encodeURIComponent(campaignId)}`
-    : "/brand/browse-influencer";
+  const frontendMaskedEmail = maskEmailForFrontend(contact?.email || contact?.maskedEmail);
+  const hasContact = Boolean(
+    contact?.hasContactInfo &&
+      (frontendMaskedEmail || contact?.website || (contact?.socialLinks || []).length),
+  );
+
+  const goBack = () => {
+    if (returnTo === "invitation" && campaignId) {
+      router.push(`/brand/influencer-invitation?q=active&campaignId=${encodeURIComponent(campaignId)}`);
+      return;
+    }
+
+    if (returnTo === "browse") {
+      router.push("/brand/browse-influencer");
+      return;
+    }
+
+    router.back();
+  };
 
   return (
-    <main className="min-h-screen bg-[#fffdf9]">
-      <div className="pointer-events-none fixed inset-x-0 top-0 h-[420px] bg-[radial-gradient(circle_at_top,#fff3c4_0%,#fff9ea_38%,rgba(255,255,255,0)_78%)] opacity-70" />
+    <main className="min-h-screen bg-[#fffdf7]">
+      <div className="pointer-events-none fixed inset-x-0 top-0 h-[440px] bg-[radial-gradient(circle_at_top,#ffe9a8_0%,#fff7df_42%,rgba(255,255,255,0)_78%)]" />
 
       <div className="relative z-10 mx-auto w-full max-w-[1180px] px-5 py-7 sm:px-7 lg:px-8">
-        <nav aria-label="Breadcrumb" className="mb-6 flex items-center gap-2 text-sm">
-          <button
-            type="button"
-            onClick={() => router.push(breadcrumbSourceHref)}
-            className="font-semibold text-[#6f624e] transition hover:text-black"
-          >
-            {breadcrumbSourceLabel}
-          </button>
-          <span className="text-[#b7aa92]">/</span>
-          <span className="font-bold text-black">Media kit</span>
-        </nav>
+        <button
+          type="button"
+          onClick={goBack}
+          className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#ead8a9] bg-white px-4 py-2 text-sm font-bold text-black shadow-sm hover:bg-[#fff8e6]"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back
+        </button>
 
         {loading ? (
           <div className="grid min-h-[60vh] place-items-center">
@@ -437,19 +447,11 @@ function MediaKitPageContent() {
           </div>
         ) : (
           <>
-            <section className="relative overflow-hidden rounded-[34px] border border-[#eadfcb] bg-white shadow-[0_18px_45px_rgba(120,83,20,0.08)]">
-              {heroBackgroundImage ? (
-                <div
-                  className="absolute inset-0 bg-cover bg-center opacity-[0.12]"
-                  style={{ backgroundImage: `url(${proxyImageUrl(heroBackgroundImage)})` }}
-                />
-              ) : null}
-              <div className="absolute inset-0 bg-gradient-to-br from-white via-white/95 to-[#fff7e2]/85" />
-
-              <div className="relative grid gap-0 lg:grid-cols-[1.18fr_0.82fr]">
+            <section className="overflow-hidden rounded-[34px] border border-[#f1e2c2] bg-white shadow-sm">
+              <div className="grid gap-0 lg:grid-cols-[1.15fr_0.85fr]">
                 <div className="p-7 sm:p-9">
                   <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
-                    <div className="h-28 w-28 shrink-0 overflow-hidden rounded-full border-4 border-white bg-[#f7efe0] shadow-[0_8px_22px_rgba(0,0,0,0.10)] ring-1 ring-[#eadfcb]">
+                    <div className="h-28 w-28 shrink-0 overflow-hidden rounded-full border-4 border-[#fff0bd] bg-[#fff3c4] shadow-sm">
                       {overview?.profilePhoto ? (
                         <img
                           src={proxyImageUrl(overview.profilePhoto)}
@@ -458,7 +460,7 @@ function MediaKitPageContent() {
                           referrerPolicy="no-referrer"
                         />
                       ) : (
-                        <div className="grid h-full w-full place-items-center text-4xl font-black text-[#8a6a2a]">
+                        <div className="grid h-full w-full place-items-center text-4xl font-black text-[#9a6500]">
                           {(overview?.creatorName || "C").slice(0, 1).toUpperCase()}
                         </div>
                       )}
@@ -473,37 +475,31 @@ function MediaKitPageContent() {
                       <h1 className="text-[36px] font-black leading-tight text-black sm:text-[44px]">
                         {overview?.creatorName || overview?.channelName || "Creator"}
                       </h1>
-                      <p className="mt-3 max-w-[640px] line-clamp-2 text-sm leading-6 text-[#6f6658]">
+                      <p className="mt-3 max-w-[640px] line-clamp-2 text-sm leading-6 text-[#7d725f]">
                         {getCleanSummary(recommendation?.summary) ||
-                          "Brand-ready creator profile with performance, audience, safety, and match-score signals."}
+                          "Brand-ready creator profile with performance, audience, safety, and campaign-fit signals."}
                       </p>
-                      {contact?.maskedEmail ? (
-                        <div className="mt-4 inline-flex max-w-full items-center gap-2 rounded-full border border-[#eadfcb] bg-white/85 px-3.5 py-2 text-xs font-bold text-[#5f4b24] shadow-sm backdrop-blur">
-                          <Mail className="h-3.5 w-3.5 shrink-0 text-[#9a6500]" />
-                          <span className="truncate">{contact.maskedEmail}</span>
-                        </div>
-                      ) : null}
                     </div>
                   </div>
                 </div>
 
-                <div className="border-t border-[#eadfcb] bg-[#fffaf0]/90 p-7 text-black backdrop-blur-sm sm:p-9 lg:border-l lg:border-t-0">
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#7a6440]">Match score</p>
-                  <p className="mt-2 text-[46px] font-black leading-none text-black">
+                <div className="bg-gradient-to-br from-[#ffbf00] via-[#f7c948] to-[#fff0aa] p-7 text-black sm:p-9">
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-black/60">Campaign fit</p>
+                  <p className="mt-2 text-[46px] font-black leading-none">
                     {scoreOrZero(scores?.campaignFitScore || scores?.relevancyScore)}
                   </p>
-                  <p className="mt-2 text-lg font-black text-black">
+                  <p className="mt-2 text-lg font-black">
                     {brandFit?.campaignFit || recommendation?.recommendation || "Brand Match"}
                   </p>
                   <div className="mt-7 grid grid-cols-2 gap-6">
                     <div>
-                      <p className="text-xs font-bold uppercase text-[#7a6440]">Authenticity</p>
+                      <p className="text-xs font-bold uppercase text-black/60">Authenticity</p>
                       <p className={`mt-1 text-3xl font-black ${getScoreColorClass(scores?.authenticityScore)}`}>
                         {scoreOrZero(scores?.authenticityScore)}%
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs font-bold uppercase text-[#7a6440]">Safety</p>
+                      <p className="text-xs font-bold uppercase text-black/60">Safety</p>
                       <p className={`mt-1 text-3xl font-black ${getScoreColorClass(scores?.brandSafetyScore)}`}>
                         {scoreOrZero(scores?.brandSafetyScore)}%
                       </p>
@@ -566,6 +562,11 @@ function MediaKitPageContent() {
                 ) : (
                   <p className="text-sm leading-6 text-[#655b4d]">This creator has been matched using campaign topic, performance, safety, and audience signals.</p>
                 )}
+                {(brandFit?.matchedTopics || []).length ? (
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {brandFit?.matchedTopics?.slice(0, 10).map((topic) => <Pill key={topic}>{topic}</Pill>)}
+                  </div>
+                ) : null}
               </Section>
             </div>
 
@@ -659,6 +660,29 @@ function MediaKitPageContent() {
               </Section>
             ) : null}
 
+            {hasContact ? (
+              <Section title="Contact & Actions" icon={<Lock className="h-5 w-5" />} className="mt-6">
+                <div className="rounded-[20px] border border-[#f1e2c2] bg-[#fffaf0] p-5">
+                  {frontendMaskedEmail ? (
+                    <div className="flex items-center gap-3 text-sm font-bold text-black">
+                      <Mail className="h-4 w-4 text-[#9a6500]" />
+                      {frontendMaskedEmail}
+                    </div>
+                  ) : null}
+                  {contact?.website ? (
+                    <div className="mt-3 flex items-center gap-3 break-all text-sm font-bold text-black">
+                      <Globe className="h-4 w-4 text-[#9a6500]" />
+                      {contact.website}
+                    </div>
+                  ) : null}
+                  {(contact?.socialLinks || []).length ? (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {contact?.socialLinks?.map((link) => <Pill key={`${link.platform}-${link.url}`}>{link.platform}</Pill>)}
+                    </div>
+                  ) : null}
+                </div>
+              </Section>
+            ) : null}
           </>
         )}
       </div>

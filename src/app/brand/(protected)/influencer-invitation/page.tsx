@@ -41,6 +41,9 @@ type Creator = {
   handle?: string;
   platform?: string;
   bio?: string;
+  description?: string;
+  channelDescription?: string;
+  primaryLanguage?: string;
   provider?: string;
   followers?: number;
   tier?: Tier;
@@ -142,6 +145,22 @@ type RecommendedCreatorsResponse =
     returnedCount?: number;
     savedCount?: number;
     message?: string;
+    selectedTier?: string;
+    selectedTierRequested?: boolean;
+    campaignSearchContext?: {
+      subscriberTier?: string;
+      tier?: string;
+      creatorTier?: string;
+      minSubscribers?: number | null;
+      maxSubscribers?: number | null;
+    };
+    recommendationBasis?: {
+      subscriberTier?: string;
+      tier?: string;
+      creatorTier?: string;
+      minSubscribers?: number | null;
+      maxSubscribers?: number | null;
+    };
   };
 
 type InvitationListResponse = {
@@ -459,6 +478,26 @@ function normalizeCreatorForRecommendationSource(
       rawCreator.thumbnail ||
       creator.picture ||
       "";
+    const description = cleanStr(
+      creator.description ||
+        creator.channelDescription ||
+        creator.bio ||
+        rawCreator.description ||
+        rawCreator.channelDescription ||
+        rawCreator.bio ||
+        rawCreator.channelDescription
+    );
+    const country = cleanStr(
+      creator.country ||
+        creator.location?.country ||
+        rawCreator.country ||
+        rawCreator.location?.country ||
+        creator.estimatedAudienceCountry ||
+        rawCreator.estimatedAudienceCountry
+    );
+    const estimatedAudienceCountry = cleanStr(
+      creator.estimatedAudienceCountry || rawCreator.estimatedAudienceCountry || country
+    );
 
     return {
       ...creator,
@@ -470,6 +509,11 @@ function normalizeCreatorForRecommendationSource(
       channelId,
       channelUrl,
       url: channelUrl,
+      bio: description || creator.bio,
+      description,
+      channelDescription: description,
+      country,
+      estimatedAudienceCountry,
       followers: Number.isFinite(followers) && followers > 0 ? followers : undefined,
       subscribers: Number.isFinite(followers) && followers > 0 ? followers : creator.subscribers,
       tier: creator.tier || { key: tierLabel, label: tierLabel },
@@ -784,13 +828,152 @@ function getExistingInvitations(data: InvitationListResponse): Invitation[] {
 }
 
 function getCreatorBio(c: Creator) {
-  const bio = String(c.bio || "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const anyCreator = c as any;
+  const candidates = [
+    c.description,
+    c.channelDescription,
+    c.bio,
+    anyCreator.rawCreator?.description,
+    anyCreator.rawCreator?.channelDescription,
+    anyCreator.rawCreator?.bio,
+    anyCreator.channelDescription,
+    anyCreator.recommendationReason,
+  ];
 
-  if (isRecommendationReasonText(bio)) return "";
+  for (const candidate of candidates) {
+    const text = cleanStr(candidate).replace(/\s+/g, " ").trim();
+    if (!text || isRecommendationReasonText(text)) continue;
+    return text;
+  }
 
-  return bio;
+  return "";
+}
+
+function getCreatorFollowers(c: Creator) {
+  const anyCreator = c as any;
+  const candidates = [
+    c.followers,
+    c.subscribers,
+    c.subscriberCount,
+    anyCreator.rawCreator?.subscribers,
+    anyCreator.rawCreator?.subscriberCount,
+    anyCreator.stats?.followers?.value,
+  ];
+
+  for (const candidate of candidates) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  return undefined;
+}
+
+function getCreatorTierLabel(c: Creator) {
+  const anyCreator = c as any;
+  const direct = cleanStr(
+    c.tier?.label ||
+      c.tier?.key ||
+      c.creatorTier ||
+      anyCreator.rawCreator?.creatorTier ||
+      anyCreator.rawCreator?.tier?.label ||
+      anyCreator.rawCreator?.tier?.key
+  );
+
+  if (direct && direct !== "—") return direct;
+
+  const followers = getCreatorFollowers(c);
+  return followers ? getTierFromFollowerCount(followers) : "—";
+}
+
+function normalizeTierKey(value?: string | null) {
+  const tier = cleanStr(value).toLowerCase().replace(/[–—]/g, "-");
+  if (!tier) return "";
+
+  if (/nano/.test(tier) || /1k\s*-\s*10k/.test(tier)) return "nano";
+  if (/micro/.test(tier) || /10k\s*-\s*100k/.test(tier)) return "micro";
+  if (/mid/.test(tier) || /100k\s*-\s*500k/.test(tier)) return "mid-tier";
+  if (/macro/.test(tier) || /250k\s*-\s*1m/.test(tier) || /500k\s*-\s*1m/.test(tier)) return "macro";
+  if (/mega/.test(tier) || /1m\s*\+/.test(tier) || /1000k\s*\+/.test(tier)) return "mega";
+
+  return tier;
+}
+
+function getTierRangeFromKey(tier?: string | null) {
+  const key = normalizeTierKey(tier);
+
+  if (key === "nano") return { min: 1000, max: 10000 };
+  if (key === "micro") return { min: 10000, max: 100000 };
+  if (key === "mid-tier") return { min: 100000, max: 500000 };
+  if (key === "macro") return { min: 500000, max: 1000000 };
+  if (key === "mega") return { min: 1000000, max: null };
+
+  return null;
+}
+
+function getRequestedTierFromRecommendationResponse(data: RecommendedCreatorsResponse) {
+  if (!data || Array.isArray(data)) return "";
+
+  const anyData = data as any;
+  return cleanStr(
+    data.campaignSearchContext?.subscriberTier ||
+      data.campaignSearchContext?.tier ||
+      data.campaignSearchContext?.creatorTier ||
+      data.recommendationBasis?.subscriberTier ||
+      data.recommendationBasis?.tier ||
+      data.recommendationBasis?.creatorTier ||
+      anyData.selectedTier ||
+      anyData.selectedTierLabel ||
+      anyData.requestedTier
+  );
+}
+
+function isCreatorInRequestedTier(c: Creator, requestedTier?: string | null) {
+  const normalizedRequested = normalizeTierKey(requestedTier);
+  if (!normalizedRequested) return true;
+
+  const directCreatorTier = normalizeTierKey(getCreatorTierLabel(c));
+  if (directCreatorTier && directCreatorTier === normalizedRequested) return true;
+
+  const followers = getCreatorFollowers(c);
+  const range = getTierRangeFromKey(normalizedRequested);
+  if (!followers || !range) return false;
+
+  if (followers < range.min) return false;
+  if (range.max !== null && followers > range.max) return false;
+
+  return true;
+}
+
+function sortCreatorsForCampaignTier(creators: Creator[], requestedTier?: string | null) {
+  const normalizedRequested = normalizeTierKey(requestedTier);
+
+  return [...creators].sort((a, b) => {
+    if (normalizedRequested) {
+      const aMatch = isCreatorInRequestedTier(a, normalizedRequested) ? 1 : 0;
+      const bMatch = isCreatorInRequestedTier(b, normalizedRequested) ? 1 : 0;
+      if (aMatch !== bMatch) return bMatch - aMatch;
+    }
+
+    const aScore = Number((a as any).recommendationScore || a.scores?.recommendationScore || a.scores?.campaignFitScore || a.aiScore || 0);
+    const bScore = Number((b as any).recommendationScore || b.scores?.recommendationScore || b.scores?.campaignFitScore || b.aiScore || 0);
+    if (aScore !== bScore) return bScore - aScore;
+
+    return Number(getCreatorFollowers(b) || 0) - Number(getCreatorFollowers(a) || 0);
+  });
+}
+
+function getCreatorCountryLabel(c: Creator) {
+  const anyCreator = c as any;
+  const value = cleanStr(
+    c.country ||
+      c.location?.country ||
+      anyCreator.rawCreator?.country ||
+      anyCreator.rawCreator?.location?.country ||
+      c.estimatedAudienceCountry ||
+      anyCreator.rawCreator?.estimatedAudienceCountry
+  );
+
+  return value || "—";
 }
 
 function cleanImageUrl(value?: string | null) {
@@ -904,7 +1087,7 @@ function CreatorAvatar({ creator, name }: { creator: Creator; name: string }) {
 }
 
 
-const INVITE_LOADING_ANIMALS = ["🎥", "🤝", "📊", "🎯", "✨", "🔎"];
+const INVITE_LOADING_ANIMALS = ["🦊", "🐼", "🦉", "🐰", "🐶", "🐯"];
 const INVITE_LOADING_BACKGROUNDS = ["🎥", "🤝", "📊", "🎯", "✨", "🔎"];
 
 function InviteCreatorLoadingAnimation() {
@@ -1462,7 +1645,11 @@ export default function InfluencerInvitationPage() {
       ]);
 
       const rawList = getRecommendedCreators(recommendedData);
-      const list = filterCreatorsForRecommendationSource(rawList, sourceInfo);
+      const requestedTier = getRequestedTierFromRecommendationResponse(recommendedData);
+      const list = sortCreatorsForCampaignTier(
+        filterCreatorsForRecommendationSource(rawList, sourceInfo),
+        requestedTier
+      );
 
       const defaultSelected = new Set<string>();
 
@@ -2036,6 +2223,9 @@ export default function InfluencerInvitationPage() {
                   const handle = getCreatorHandle(c);
                   const audienceAuthenticity = getCreatorAudienceAuthenticity(c);
                   const creatorBio = getCreatorBio(c);
+                  const followers = getCreatorFollowers(c);
+                  const tierLabel = getCreatorTierLabel(c);
+                  const countryLabel = getCreatorCountryLabel(c);
 
                   return (
                     <div
@@ -2088,7 +2278,7 @@ export default function InfluencerInvitationPage() {
 
                             <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] leading-[19px] sm:text-[15px] sm:leading-[21px]">
                               <span className="font-medium text-[#202124]">
-                                {formatCompact(c.followers)}
+                                {formatCompact(followers)}
                               </span>
 
                               <span className="font-normal text-[#8E8E8E]">
@@ -2098,17 +2288,27 @@ export default function InfluencerInvitationPage() {
                               <span className="text-[#B5B5B5]">·</span>
 
                               <span className="font-semibold text-[#202124]">
-                                {c.tier?.key || c.tier?.label || "—"}
+                                {tierLabel}
                               </span>
 
                               <span className="font-normal text-[#8E8E8E]">
                                 Tier
                               </span>
 
+                              <span className="text-[#B5B5B5]">·</span>
+
+                              <span className="font-medium text-[#202124]">
+                                {countryLabel}
+                              </span>
+
+                              <span className="font-normal text-[#8E8E8E]">
+                                Country
+                              </span>
+
                             </div>
 
                             {creatorBio ? (
-                              <div className="mt-1.5 line-clamp-1 text-[12px] leading-[18px] text-[#8E8E8E]">
+                              <div className="mt-1.5 line-clamp-2 max-w-3xl text-[12px] leading-[18px] text-[#8E8E8E]">
                                 {creatorBio}
                               </div>
                             ) : null}

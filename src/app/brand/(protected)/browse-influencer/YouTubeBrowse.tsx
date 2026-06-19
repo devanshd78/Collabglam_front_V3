@@ -242,7 +242,7 @@ type CountryOption = {
 };
 
 function getRuntimeApiBaseUrl() {
-  const explicit = String(process.env.NEXT_PUBLIC_API_URL || "").trim();
+  const explicit = String(process.env.NEXT_PUBLIC_API_BASE_URL || "").trim();
   if (explicit) return explicit;
 
   if (typeof window !== "undefined") {
@@ -483,7 +483,7 @@ function VideoThumbnail({ src, title }: { src?: string; title?: string }) {
 
 
 
-const LOADING_ANIMALS = ["💻", "📱", "⚡", "🤖", "🎧", "🔍"];
+const LOADING_ANIMALS = ["🦊", "🐼", "🦉", "🐰", "🐶", "🐯"];
 
 const DEFAULT_CAMPAIGN_LOADING_BACKGROUNDS = ["✨", "🎯", "🤝", "📊", "🔎", "⚡"];
 
@@ -610,8 +610,9 @@ function CreatorSearchLoader({ topic }: { topic?: string }) {
           </div>
         </div>
 
-      
-      
+        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#a98634]">
+          CollabGlam AI discovery
+        </p>
         <h3 className="mt-3 text-[22px] font-semibold text-black">
           Finding creators for {topicLabel}
         </h3>
