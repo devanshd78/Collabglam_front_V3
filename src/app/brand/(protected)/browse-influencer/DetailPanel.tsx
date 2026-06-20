@@ -312,7 +312,7 @@ const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 const BACKEND_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 const DETAIL_PANEL_API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || '';
-const API_REPORT_ENDPOINT = `${BACKEND_BASE_URL}/modash/report`;
+const API_REPORT_ENDPOINT = `${BACKEND_BASE_URL}modash/report`;
 
 function getDetailPanelApiUrl(path: string) {
   const base = String(DETAIL_PANEL_API_BASE_URL || '').replace(/\/$/, '');
