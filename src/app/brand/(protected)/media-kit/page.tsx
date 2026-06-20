@@ -12,7 +12,6 @@ import {
   Lock,
   Mail,
   PlayCircle,
-  ShieldCheck,
   Sparkles,
   Target,
   TrendingUp,
@@ -175,14 +174,14 @@ function scoreOrZero(value?: number) {
 
 function getScoreColorClass(value?: number) {
   const score = scoreOrZero(value);
-  if (score >= 75) return "text-[#16803a]";
+  if (score >= 75) return "text-[#4ade80]";
   if (score >= 35) return "text-[#b7791f]";
   return "text-[#dc2626]";
 }
 
 function getScoreBarClass(value?: number) {
   const score = scoreOrZero(value);
-  if (score >= 75) return "bg-[#16a34a]";
+  if (score >= 75) return "bg-[#bbf7d0]";
   if (score >= 35) return "bg-[#f59e0b]";
   return "bg-[#dc2626]";
 }
@@ -375,11 +374,9 @@ function MediaKitPageContent() {
   const overview = data?.creatorOverview;
   const metrics = data?.coreMetrics;
   const scores = data?.performanceScores;
-  const audience = data?.audienceInsights;
   const brandFit = data?.brandFit;
   const content = data?.contentAnalysis;
   const sponsorship = data?.sponsorshipAnalysis;
-  const safety = data?.brandSafety;
   const prediction = data?.campaignPrediction;
   const contact = data?.contact;
   const recommendation = data?.collabGlamRecommendation;
@@ -427,7 +424,7 @@ function MediaKitPageContent() {
               </div>
               <h1 className="mt-5 text-2xl font-black text-black">Building brand media kit</h1>
               <p className="mt-2 text-sm leading-6 text-[#7d725f]">
-                Preparing audience, authenticity, performance, safety, sponsorship, and campaign prediction insights.
+                Preparing authenticity, performance, sponsorship, and campaign prediction insights.
               </p>
             </div>
           </div>
@@ -477,7 +474,7 @@ function MediaKitPageContent() {
                       </h1>
                       <p className="mt-3 max-w-[640px] line-clamp-2 text-sm leading-6 text-[#7d725f]">
                         {getCleanSummary(recommendation?.summary) ||
-                          "Brand-ready creator profile with performance, audience, safety, and campaign-fit signals."}
+                          "Brand-ready creator profile with performance, authenticity, and campaign-fit signals."}
                       </p>
                     </div>
                   </div>
@@ -491,17 +488,11 @@ function MediaKitPageContent() {
                   <p className="mt-2 text-lg font-black">
                     {brandFit?.campaignFit || recommendation?.recommendation || "Brand Match"}
                   </p>
-                  <div className="mt-7 grid grid-cols-2 gap-6">
+                  <div className="mt-7">
                     <div>
                       <p className="text-xs font-bold uppercase text-black/60">Authenticity</p>
                       <p className={`mt-1 text-3xl font-black ${getScoreColorClass(scores?.authenticityScore)}`}>
                         {scoreOrZero(scores?.authenticityScore)}%
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase text-black/60">Safety</p>
-                      <p className={`mt-1 text-3xl font-black ${getScoreColorClass(scores?.brandSafetyScore)}`}>
-                        {scoreOrZero(scores?.brandSafetyScore)}%
                       </p>
                     </div>
                   </div>
@@ -516,37 +507,13 @@ function MediaKitPageContent() {
               <MetricCard label="Recent upload" value={formatDate(metrics?.recentUploadDate)} sub={`${metrics?.uploadsLast2Years || 0} uploads in 2 years`} icon={<CalendarDays className="h-5 w-5" />} />
             </div>
 
-            <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <ScoreCard icon={<Target className="h-5 w-5" />} label="Relevancy" value={scores?.relevancyScore} hint="Campaign topic and content match" />
-              <ScoreCard icon={<ShieldCheck className="h-5 w-5" />} label="Brand safety" value={scores?.brandSafetyScore} hint={safety?.riskLevel ? `${safety.riskLevel} risk` : "Risk screening"} />
               <ScoreCard icon={<Users className="h-5 w-5" />} label="Authenticity" value={scores?.authenticityScore} hint="Audience quality" />
               <ScoreCard icon={<TrendingUp className="h-5 w-5" />} label="Consistency" value={scores?.consistencyScore} hint="Upload activity and stability" />
             </div>
 
-            <div className="mt-6 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-              <Section title="Audience Insights" icon={<Globe className="h-5 w-5" />}>
-                <div className="space-y-4">
-                  {(audience?.estimatedAudienceCountries || []).length ? (
-                    audience?.estimatedAudienceCountries?.map((item) => (
-                      <div key={item.country}>
-                        <div className="mb-2 flex items-center justify-between text-sm font-bold text-black">
-                          <span>{item.country}</span>
-                          <span>{item.percentage}%</span>
-                        </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-[#f1e2c2]">
-                          <div className="h-full rounded-full bg-[#d97706]" style={{ width: `${item.percentage}%` }} />
-                        </div>
-                      </div>
-                    ))
-                  ) : null}
-                  {(audience?.interestCategories || []).length ? (
-                    <div className="flex flex-wrap gap-2 pt-2">
-                      {audience?.interestCategories?.slice(0, 12).map((item) => <Pill key={item}>{item}</Pill>)}
-                    </div>
-                  ) : null}
-                </div>
-              </Section>
-
+            <div className="mt-6">
               <Section title="Brand Fit" icon={<CheckCircle2 className="h-5 w-5" />}>
                 {(brandFit?.whyThisCreatorFits || []).length ? (
                   <ul className="space-y-3">
@@ -560,7 +527,7 @@ function MediaKitPageContent() {
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-sm leading-6 text-[#655b4d]">This creator has been matched using campaign topic, performance, safety, and audience signals.</p>
+                  <p className="text-sm leading-6 text-[#655b4d]">This creator has been matched using campaign topic, performance, and creator relevance signals.</p>
                 )}
                 {(brandFit?.matchedTopics || []).length ? (
                   <div className="mt-5 flex flex-wrap gap-2">

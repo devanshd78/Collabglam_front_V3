@@ -7,8 +7,10 @@ import Confetti from "@/components/ui/ConfettiUi";
 import api, { post, getApiErrorMessage } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
 import { DetailPanel } from "@/app/brand/(protected)/browse-influencer/DetailPanel";
+import { Eye } from "lucide-react";
 
 const COLORS = ["#FFBF00", "#5E412B", "#F57F17", "#F7E152", "#FEF55B"];
+const INVITATION_CREATOR_LIMIT = 50;
 
 type Tier = {
   key?: string;
@@ -142,6 +144,10 @@ type RecommendedCreatorsResponse =
     data?: Creator[];
     processing?: boolean;
     backgroundStarted?: boolean;
+    jobId?: string;
+    done?: boolean;
+    count?: number;
+    totalFound?: number;
     returnedCount?: number;
     savedCount?: number;
     message?: string;
@@ -817,9 +823,8 @@ function getRecommendedCreators(data: RecommendedCreatorsResponse): Creator[] {
   return [];
 }
 
-function wait(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
+
+
 
 function getExistingInvitations(data: InvitationListResponse): Invitation[] {
   if (Array.isArray(data?.data)) return data.data;
@@ -1087,7 +1092,7 @@ function CreatorAvatar({ creator, name }: { creator: Creator; name: string }) {
 }
 
 
-const INVITE_LOADING_ANIMALS = ["🦊", "🐼", "🦉", "🐰", "🐶", "🐯"];
+const INVITE_LOADING_ANIMALS = ["🤖", "🧠", "⚙️", "💻", "📡", "🛰️", "⚡", "🔍"];
 const INVITE_LOADING_BACKGROUNDS = ["🎥", "🤝", "📊", "🎯", "✨", "🔎"];
 
 function InviteCreatorLoadingAnimation() {
@@ -1458,6 +1463,145 @@ function getReportLastFetchedAt(data?: ModashReportResponse | null) {
   return value ? String(value) : null;
 }
 
+function buildDetailPanelRawFromInvitationCreator(
+  creator?: Creator | null
+): ModashReportResponse | null {
+  if (!creator) return null;
+
+  const isYoutube = isYouTubeCreator(creator);
+  const platform = isYoutube ? "youtube" : getCreatorPlatform(creator);
+  const channelId = getCreatorChannelId(creator);
+  const modashId = getCreatorModashId(creator);
+  const userId = channelId || modashId;
+  const name = getCreatorName(creator);
+  const handle =
+    getCreatorReportHandle(creator) ||
+    (channelId ? channelId : creator.username || creator.handle || null);
+  const username = String(handle || userId || name || "")
+    .replace(/^@/, "")
+    .trim();
+  const followers = getCreatorFollowers(creator);
+  const avgViews = numOrUndefined(
+    creator.avgViews || creator.stats?.averageViews || (creator as any)?.averageViews
+  );
+  const engagementRate = numOrUndefined(
+    creator.engagementRate || creator.stats?.engagementRate
+  );
+  const country = getCreatorCountryLabel(creator);
+  const picture = getCreatorPicture(creator);
+  const bio = getCreatorBio(creator);
+  const authenticity = getCreatorAudienceAuthenticity(creator);
+  const postsCount = numOrUndefined(
+    (creator as any).totalVideos || (creator as any).totalVideoCount || (creator as any).postsCount
+  );
+  const recentVideos = Array.isArray((creator as any).recentVideoTitles)
+    ? (creator as any).recentVideoTitles
+    : Array.isArray((creator as any).recentVideos)
+      ? (creator as any).recentVideos
+      : [];
+  const recentPosts = recentVideos.map((video: any) => ({
+    id: video?.videoId || video?.id,
+    videoId: video?.videoId || video?.id,
+    title: video?.title,
+    text: video?.description || video?.title,
+    caption: video?.description || video?.title,
+    description: video?.description || "",
+    image: video?.thumbnail || video?.image,
+    thumbnail: video?.thumbnail || video?.image,
+    url: video?.url || video?.videoUrl,
+    views: numOrUndefined(video?.views || video?.viewCount),
+    likes: numOrUndefined(video?.likes || video?.likeCount),
+    comments: numOrUndefined(video?.comments || video?.commentCount),
+    createdAt: video?.publishedAt || video?.createdAt,
+    publishedAt: video?.publishedAt || video?.createdAt,
+    date: video?.publishedAt || video?.createdAt,
+    type: "YouTube video",
+  }));
+
+  const profile = {
+    userId,
+    channelId,
+    youtubeChannelId: channelId,
+    modashId: userId,
+    username,
+    handle,
+    fullname: name,
+    name,
+    url: creator.channelUrl || creator.url || creator.urls?.url ||
+      (channelId ? `https://www.youtube.com/channel/${channelId}` : null),
+    picture,
+    followers,
+    subscribers: followers,
+    avgViews,
+    averageViews: avgViews,
+    engagementRate,
+    bio,
+    description: bio,
+    country: country === "—" ? null : country,
+    provider: platform,
+    postsCount,
+    postsCounts: postsCount,
+    categories: creator.category ? [{ name: creator.category, categoryName: creator.category }] : [],
+    recentPosts,
+    popularPosts: recentPosts,
+    stats: {
+      followers: { value: followers },
+      avgViews: { value: avgViews },
+      averageViews: avgViews,
+      engagementRate,
+    },
+    audience: {
+      geoCountries: country && country !== "—" ? [{ name: country, weight: 1 }] : [],
+      ages: [],
+      genders: [],
+      languages: [],
+      interests: Array.isArray(creator.categories)
+        ? creator.categories.map((item) => ({ name: item, weight: 1 }))
+        : creator.category
+          ? [{ name: creator.category, weight: 1 }]
+          : [],
+      credibility: authenticity ? authenticity / 100 : null,
+    },
+  };
+
+  return {
+    _source: isYoutube ? "youtube_api" : "modash_ai",
+    _lastFetchedAt: new Date().toISOString(),
+    provider: platform,
+    platform,
+    userId,
+    channelId,
+    youtubeChannelId: channelId,
+    modashId: userId,
+    username,
+    handle,
+    fullname: name,
+    name,
+    url: profile.url,
+    picture,
+    bio,
+    description: bio,
+    country: country === "—" ? null : country,
+    followers,
+    subscribers: followers,
+    avgViews,
+    averageViews: avgViews,
+    engagementRate,
+    postsCount,
+    postsCounts: postsCount,
+    recentPosts,
+    popularPosts: recentPosts,
+    sponsoredPosts: [],
+    profile,
+    stats: profile.stats,
+    audience: profile.audience,
+    categories: profile.categories,
+    hashtags: [],
+    lookalikes: [],
+    statHistory: [],
+  } as ModashReportResponse;
+}
+
 function ModashReportSideModal({
   drawer,
   onClose,
@@ -1472,10 +1616,12 @@ function ModashReportSideModal({
   campaignId?: string | null;
 }) {
   const creator = drawer.creator;
+  const youtubeChannelId = creator && isYouTubeCreator(creator) ? getCreatorChannelId(creator) : null;
+  const fallbackRaw = drawer.raw || drawer.data || buildDetailPanelRawFromInvitationCreator(creator);
   const platform = normalizeReportPlatform(
-    getCreatorPlatform(creator || {}) || drawer.data?.provider
+    getCreatorPlatform(creator || {}) || fallbackRaw?.provider
   );
-  const handle = getCreatorReportHandle(creator);
+  const handle = getCreatorReportHandle(creator) || youtubeChannelId || null;
 
   return (
     <DetailPanel
@@ -1484,13 +1630,14 @@ function ModashReportSideModal({
       loading={drawer.loading}
       error={drawer.error}
       data={(drawer.data as any) || null}
-      raw={drawer.raw || drawer.data}
+      raw={fallbackRaw}
       platform={platform as any}
       emailExists={null}
       onChangeCalc={onChangeCalc}
       brandId={getStoredBrandMongoId()}
       campaignId={campaignId}
       handle={handle}
+      youtubeChannelId={youtubeChannelId}
       lastFetchedAt={drawer.lastFetchedAt}
       onRefreshReport={onRefresh}
       connectedProfiles={[]}
@@ -1579,26 +1726,21 @@ export default function InfluencerInvitationPage() {
   const fetchYouTubeCampaignRecommendations = React.useCallback(
     async (brandId: string, currentCampaignId: string) => {
       const url = `/youtube-data/campaign/${currentCampaignId}/recommend-influencers`;
+      const body = {
+        brandId,
+        campaignId: currentCampaignId,
+        limit: INVITATION_CREATOR_LIMIT,
+        minimumInfluencers: INVITATION_CREATOR_LIMIT,
+        minInfluencers: INVITATION_CREATOR_LIMIT,
+        save: true,
+        strictCountry: true,
+        fast: true,
+        background: false,
+      };
 
-      const response = await api.post<RecommendedCreatorsResponse>(
-        url,
-        {
-          brandId,
-          campaignId: currentCampaignId,
-          limit: 100,
-          minimumInfluencers: 50,
-          minInfluencers: 50,
-          save: true,
-          strictCountry: true,
-          fast: false,
-          background: false,
-          forceBackground: false,
-        },
-        {
-          // Wait up to 15 minutes while backend completes YouTube discovery.
-          timeout: 900000,
-        }
-      );
+      const response = await api.post<RecommendedCreatorsResponse>(url, body, {
+        timeout: 300000,
+      });
 
       return response.data;
     },
@@ -1616,35 +1758,52 @@ export default function InfluencerInvitationPage() {
         throw new Error("Missing brand _id or campaign _id");
       }
 
-      // ✅ Step 1: first check campaign platform by campaignId
-      const sourceData = await post<CampaignRecommendationSourceResponse>(
-        "/modash/campaign-recommendation-source",
+      const [sourceData, existingKeys] = await Promise.all([
+        post<CampaignRecommendationSourceResponse>(
+          "/modash/campaign-recommendation-source",
+          {
+            brandId,
+            campaignId,
+          }
+        ),
+        fetchExistingInvitations(brandId, campaignId),
+      ]);
+
+      const sourceInfo = getResolvedRecommendationSource(sourceData);
+      setAlreadyInvited(existingKeys);
+      setSending(new Set());
+
+      if (sourceInfo.source === "youtube_api") {
+        const finalData = await fetchYouTubeCampaignRecommendations(brandId, campaignId);
+        const requestedTier = getRequestedTierFromRecommendationResponse(finalData);
+        const finalList = sortCreatorsForCampaignTier(
+          filterCreatorsForRecommendationSource(getRecommendedCreators(finalData), sourceInfo),
+          requestedTier
+        );
+
+        const defaultSelected = new Set<string>();
+        finalList.forEach((creator, index) => {
+          creatorKeysForMatching(creator, index).forEach((key) => {
+            defaultSelected.add(key);
+          });
+        });
+
+        setCreators(finalList);
+        setSelected(defaultSelected);
+        return;
+      }
+
+      const recommendedData = await post<RecommendedCreatorsResponse>(
+        "/modash/recommended-by-campaign",
         {
           brandId,
           campaignId,
+          limit: INVITATION_CREATOR_LIMIT,
+          source: sourceInfo.source,
+          platforms: sourceInfo.effectivePlatforms,
+          rule: sourceInfo.rule,
         }
       );
-
-      const sourceInfo = getResolvedRecommendationSource(sourceData);
-
-      // ✅ Step 2: then fetch suggestions according to the exact source selected by backend.
-      // YouTube recommendations use a fast non-blocking API to avoid the 40s frontend timeout.
-      const recommendedRequest =
-        sourceInfo.source === "youtube_api"
-          ? fetchYouTubeCampaignRecommendations(brandId, campaignId)
-          : post<RecommendedCreatorsResponse>("/modash/recommended-by-campaign", {
-            brandId,
-            campaignId,
-            limit: 15,
-            source: sourceInfo.source,
-            platforms: sourceInfo.effectivePlatforms,
-            rule: sourceInfo.rule,
-          });
-
-      const [recommendedData, existingKeys] = await Promise.all([
-        recommendedRequest,
-        fetchExistingInvitations(brandId, campaignId),
-      ]);
 
       const rawList = getRecommendedCreators(recommendedData);
       const requestedTier = getRequestedTierFromRecommendationResponse(recommendedData);
@@ -1662,9 +1821,7 @@ export default function InfluencerInvitationPage() {
       });
 
       setCreators(list);
-      setAlreadyInvited(existingKeys);
       setSelected(defaultSelected);
-      setSending(new Set());
     } catch (e: any) {
       const message = await getApiErrorMessage(e, "Failed to load creators");
 
@@ -1916,6 +2073,30 @@ export default function InfluencerInvitationPage() {
     [openReportForCreator, reportDrawer.creator]
   );
 
+
+  const openMediaKitForCreator = React.useCallback(
+    (creator: Creator) => {
+      if (isYouTubeCreator(creator)) {
+        const raw = buildDetailPanelRawFromInvitationCreator(creator);
+
+        setReportDrawer({
+          open: true,
+          creator,
+          loading: false,
+          error: null,
+          data: raw,
+          raw,
+          lastFetchedAt: getReportLastFetchedAt(raw),
+          calculationMethod: reportCalculationMethod,
+        });
+        return;
+      }
+
+      void openReportForCreator(creator);
+    },
+    [openReportForCreator, reportCalculationMethod]
+  );
+
   const getNavigateHref = React.useCallback(
     (target: NavigateTarget) => {
       if (target === "dashboard") return "/brand/dashboard";
@@ -2134,15 +2315,8 @@ export default function InfluencerInvitationPage() {
 
   const total = creators.length;
 
-  const selectedCount = creators.reduce((count, creator, index) => {
-    return isCreatorSelected(selected, creator, index) ? count + 1 : count;
-  }, 0);
-
-  const isAllSelected = total > 0 && selectedCount === total;
-
   const isAnySending = sending.size > 0;
   const footerDisabled = loading || bulkCreating || isAnySending;
-  const inviteButtonLabel = isAllSelected ? "Invite All" : "Invite selected";
 
   return (
     <div className="relative flex h-dvh w-screen flex-col overflow-hidden bg-white">
@@ -2199,8 +2373,7 @@ export default function InfluencerInvitationPage() {
           </h1>
 
           <p className="mx-auto mt-2 max-w-2xl text-[15px] leading-[22px] text-gray-800">
-            Creators are selected by default. Deselect anyone you do not want to
-            invite.
+            Review recommended creators and open each media kit before continuing.
           </p>
 
           {error ? (
@@ -2212,13 +2385,17 @@ export default function InfluencerInvitationPage() {
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-transparent">
           <div className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
-            {loading ? (
+            {loading && creators.length === 0 ? (
               <InviteCreatorLoadingAnimation />
             ) : (
               <>
+                {loading && creators.length > 0 ? (
+                  <div className="mx-2 mb-3 rounded-lg border border-[#efe8dd] bg-[#fffaf0] px-4 py-3 text-sm font-medium text-[#7a5a16]">
+                    Refreshing accurate creator recommendations...
+                  </div>
+                ) : null}
                 {creators.map((c, index) => {
                   const id = rowId(c, index);
-                  const isSelected = isCreatorSelected(selected, c, index);
                   const isSending = sending.has(id);
 
                   const name = getCreatorName(c);
@@ -2234,25 +2411,11 @@ export default function InfluencerInvitationPage() {
                       key={id}
                       role="button"
                       tabIndex={0}
-                      onClick={() => {
-                        const mediaKitHref = buildCreatorMediaKitHref(c, campaignId);
-                        if (isYouTubeCreator(c) && mediaKitHref) {
-                          router.push(mediaKitHref);
-                          return;
-                        }
-
-                        void openReportForCreator(c);
-                      }}
+                      onClick={() => openMediaKitForCreator(c)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          const mediaKitHref = buildCreatorMediaKitHref(c, campaignId);
-                          if (isYouTubeCreator(c) && mediaKitHref) {
-                            router.push(mediaKitHref);
-                            return;
-                          }
-
-                          void openReportForCreator(c);
+                          openMediaKitForCreator(c);
                         }
                       }}
                       className="creator-row-animate relative mx-2 my-1 cursor-pointer rounded-lg bg-white/42 backdrop-blur-[1px] transition-transform duration-200 ease-out will-change-transform hover:scale-[0.992] after:absolute after:bottom-0 after:left-5 after:right-5 after:h-px after:bg-black/5 after:content-[''] last:after:hidden"
@@ -2320,7 +2483,7 @@ export default function InfluencerInvitationPage() {
                         <div className="flex shrink-0 items-center gap-3 self-end sm:self-center">
                           <div className="hidden min-w-[92px] text-right sm:block">
                             <p className="text-[10px] font-bold uppercase tracking-wide text-[#9a7a38]">
-                              Authenticity
+                              Audience Authenticity
                             </p>
                             <p className={`mt-0.5 text-[20px] font-black leading-none ${getAudienceAuthenticityColorClass(audienceAuthenticity)}`}>
                               {audienceAuthenticity !== null ? `${audienceAuthenticity}%` : "—"}
@@ -2329,19 +2492,15 @@ export default function InfluencerInvitationPage() {
 
                           <Button
                             type="button"
-                            variant={isSelected ? undefined : "outline"}
-                            className={
-                              isSelected
-                                ? "h-10 rounded-full border-2 border-[#202124] bg-[#202124] px-7 text-[15px] font-semibold text-white hover:bg-[#202124] hover:text-white disabled:opacity-60"
-                                : "h-10 rounded-full border-2 border-[#202124] bg-white px-7 text-[15px] font-semibold text-[#202124] hover:bg-[#F5F5F5] hover:text-[#202124] disabled:opacity-60"
-                            }
+                            className="inline-flex h-10 items-center gap-2 rounded-full bg-[#202124] px-6 text-[14px] font-semibold text-white hover:bg-[#202124]/90 disabled:opacity-60"
                             disabled={isSending || bulkCreating}
                             onClick={(event) => {
                               event.stopPropagation();
-                              toggleCreatorSelection(c, index);
+                              openMediaKitForCreator(c);
                             }}
                           >
-                            {isSending ? "Sending..." : "Invite"}
+                            <Eye className="h-4 w-4" />
+                            Insights
                           </Button>
                         </div>
                       </div>
@@ -2384,7 +2543,7 @@ export default function InfluencerInvitationPage() {
       <footer className="relative z-20 shrink-0 border-t border-black/5 bg-white/60 backdrop-blur-md">
         <div className="mx-auto flex min-h-14 w-full max-w-[1280px] flex-col gap-3 px-6 py-2.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm font-bold text-gray-800">
-            {selectedCount}/{total || 0} Selected
+            {total || 0} creators found
           </div>
 
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end sm:gap-6">
@@ -2397,11 +2556,11 @@ export default function InfluencerInvitationPage() {
             </Button>
 
             <Button
-              onClick={() => handleCreateSelectedAndNavigate("next")}
+              onClick={() => router.replace("/brand/campaign/all")}
               className="rounded-lg bg-black px-9 py-2.5 text-sm font-medium text-white disabled:opacity-50"
-              disabled={footerDisabled || !creators.length || selectedCount === 0}
+              disabled={footerDisabled}
             >
-              {bulkCreating ? "Sending..." : inviteButtonLabel}
+              Skip
             </Button>
           </div>
         </div>

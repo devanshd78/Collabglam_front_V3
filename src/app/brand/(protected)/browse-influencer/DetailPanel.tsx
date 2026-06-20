@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   AlertCircle,
@@ -272,9 +272,16 @@ type EmailDraftState = {
   campaignIds: string[];
   fromEmail: string;
   fromName: string;
+
+  // Show only creator handle in editor.
   toLabel: string;
+
+  // Keep empty for invitation flow. Do not expose real email in frontend.
   toEmail?: string;
+
+  channelId?: string | null;
   missingEmailId?: string | null;
+
   subject: string;
   initialBody: string;
   initialHtmlBody: string;
@@ -761,6 +768,174 @@ function buildLookalikeReportFromPanelItem(
     statHistory: Array.isArray(rawItem?.statHistory) ? rawItem.statHistory : [],
     lookalikes: Array.isArray(rawItem?.lookalikes) ? rawItem.lookalikes : [],
   } as InfluencerReport & { _id?: string };
+}
+
+
+function isYouTubeChannelId(value?: string | null) {
+  return /^UC[A-Za-z0-9_-]{20,}$/i.test(String(value || '').trim());
+}
+
+function cleanHandleCandidate(value?: any) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const withoutUrl = raw
+    .replace(/^https?:\/\/(www\.)?youtube\.com\//i, '')
+    .replace(/^@+/, '')
+    .trim();
+
+  if (!withoutUrl) return '';
+  if (isYouTubeChannelId(withoutUrl)) return '';
+
+  // Do not treat channel URLs, channel IDs, or random path values as handles.
+  if (/^channel\//i.test(withoutUrl)) return '';
+  if (/^c\//i.test(withoutUrl)) return '';
+  if (/^user\//i.test(withoutUrl)) return '';
+
+  const simple = withoutUrl.split(/[/?#]/)[0].replace(/^@+/, '').trim();
+
+  if (!simple || isYouTubeChannelId(simple)) return '';
+
+  if (!/^[A-Za-z0-9._-]+$/.test(simple)) return '';
+
+  return `@${simple.toLowerCase()}`;
+}
+
+function getSafeCreatorHandle(params: {
+  selectedReport?: any;
+  raw?: any;
+  data?: any;
+  handle?: string | null;
+}) {
+  const { selectedReport, raw, data, handle } = params;
+
+  const candidates = [
+    handle,
+
+    selectedReport?.handle,
+    selectedReport?.username,
+
+    raw?.handle,
+    raw?.username,
+    raw?.profile?.handle,
+    raw?.profile?.username,
+    raw?.youtube?.handle,
+    raw?.creator?.handle,
+    raw?.influencer?.handle,
+
+    data?.handle,
+    data?.username,
+    data?.profile?.handle,
+    data?.profile?.username,
+    data?.youtube?.handle,
+    data?.creator?.handle,
+    data?.influencer?.handle,
+  ];
+
+  for (const candidate of candidates) {
+    const cleaned = cleanHandleCandidate(candidate);
+    if (cleaned) return cleaned;
+  }
+
+  return '';
+}
+
+function makeValidInvitationHandle(value?: any, prefix = '') {
+  const raw = String(value || '').trim();
+
+  if (!raw) return '';
+
+  const withoutAt = raw
+    .replace(/^@+/, '')
+    .replace(/^https?:\/\/(www\.)?youtube\.com\//i, '')
+    .replace(/^channel\//i, '')
+    .replace(/^c\//i, '')
+    .replace(/^user\//i, '')
+    .split(/[/?#]/)[0]
+    .trim();
+
+  if (!withoutAt) return '';
+
+  const safe = withoutAt
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[._-]+|[._-]+$/g, '');
+
+  if (!safe) return '';
+
+  return `@${prefix}${safe}`;
+}
+
+function getBackendInvitationHandle(params: {
+  selectedReport?: any;
+  raw?: any;
+  data?: any;
+  handle?: string | null;
+  displayName?: string;
+  editorToLabel?: string;
+  channelId?: string | null;
+}) {
+  const realHandle = getSafeCreatorHandle({
+    selectedReport: params.selectedReport,
+    raw: params.raw,
+    data: params.data,
+    handle: params.handle,
+  });
+
+  if (realHandle) return realHandle;
+
+  const fallbackFromLabel = makeValidInvitationHandle(params.editorToLabel);
+  if (fallbackFromLabel && fallbackFromLabel !== '@creator') {
+    return fallbackFromLabel;
+  }
+
+  const fallbackFromName = makeValidInvitationHandle(params.displayName);
+  if (
+    fallbackFromName &&
+    fallbackFromName !== '@creator' &&
+    fallbackFromName !== '@creator-profile'
+  ) {
+    return fallbackFromName;
+  }
+
+  const channelId = String(params.channelId || '').trim();
+
+  if (channelId) {
+    return makeValidInvitationHandle(channelId, 'youtube-');
+  }
+
+  return '';
+}
+
+function getCreatorToLabel(params: {
+  selectedReport?: any;
+  raw?: any;
+  data?: any;
+  handle?: string | null;
+  displayName?: string;
+}) {
+  const safeHandle = getSafeCreatorHandle(params);
+
+  if (safeHandle) return safeHandle;
+
+  const name = String(
+    params.displayName ||
+      params.selectedReport?.name ||
+      params.selectedReport?.fullname ||
+      params.selectedReport?.channelName ||
+      params.raw?.title ||
+      params.raw?.profile?.title ||
+      params.raw?.profile?.channelName ||
+      params.data?.title ||
+      params.data?.profile?.title ||
+      params.data?.profile?.channelName ||
+      ''
+  ).trim();
+
+  if (name && !isYouTubeChannelId(name)) return name;
+
+  return 'Creator';
 }
 
 function pickFirstArray(...candidates: any[]): any[] {
@@ -2247,6 +2422,75 @@ async function fetchDetailPanelYouTubeMediaKit(
   return (json?.data || null) as YouTubeMediaKitData | null;
 }
 
+async function fetchDetailPanelYouTubeAdvancedAnalytics({
+  channelId,
+  brandId,
+  calculationMethod = 'average',
+}: {
+  channelId: string;
+  brandId?: string;
+  calculationMethod?: 'median' | 'average';
+}) {
+  const safeChannelId = String(channelId || '').trim();
+
+  if (!safeChannelId) {
+    throw new Error('Missing YouTube channel ID');
+  }
+
+  const params = new URLSearchParams({
+    platform: 'youtube',
+    userId: safeChannelId,
+    calculationMethod,
+  });
+
+  const safeBrandId = String(brandId || '').trim();
+  const safeAdminId = getLocalStorageValue('adminId');
+
+  if (safeBrandId) {
+    params.set('brandId', safeBrandId);
+  } else if (safeAdminId) {
+    params.set('adminId', safeAdminId);
+  }
+
+  const response = await fetch(`${API_REPORT_ENDPOINT}?${params.toString()}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+
+  const apiRaw = await response.json().catch(() => ({}));
+
+  if (isReportLimitExceededPayload(apiRaw, response.status)) {
+    throw createReportApiError(apiRaw, response.status, 'Report limit exceeded');
+  }
+
+  if (!response.ok || apiRaw?.error) {
+    const message =
+      apiRaw?.message ||
+      apiRaw?.msg ||
+      (typeof apiRaw?.error === 'string'
+        ? apiRaw.error
+        : `Failed to load advanced analytics (${response.status})`);
+
+    throw createReportApiError(apiRaw, response.status, message);
+  }
+
+  const normalized = normalizeReport(apiRaw, 'youtube');
+  const report = buildPrimaryReport(normalized, apiRaw, 'youtube', safeChannelId);
+
+  if (!report) {
+    throw new Error('Advanced analytics loaded, but report data could not be read.');
+  }
+
+  return {
+    raw: apiRaw,
+    report,
+    fetchedAt:
+      typeof apiRaw?._lastFetchedAt === 'string'
+        ? apiRaw._lastFetchedAt
+        : new Date().toISOString(),
+  };
+}
+
 function formatYouTubeMediaKitNumber(value?: number | string | null) {
   const n = Number(value || 0);
   if (!Number.isFinite(n) || n <= 0) return '—';
@@ -2290,14 +2534,14 @@ function scoreYouTubeMediaKitValue(value?: number | string | null) {
 
 function getYouTubeMediaKitScoreTextClass(value?: number | string | null) {
   const score = scoreYouTubeMediaKitValue(value);
-  if (score >= 75) return 'text-[#16803a]';
+if (score >= 75) return 'text-[#16a34a]';
   if (score >= 35) return 'text-[#b7791f]';
   return 'text-[#dc2626]';
 }
 
 function getYouTubeMediaKitScoreBarClass(value?: number | string | null) {
   const score = scoreYouTubeMediaKitValue(value);
-  if (score >= 75) return 'bg-[#16a34a]';
+  if (score >= 75) return 'bg-[#c9ffde]';
   if (score >= 35) return 'bg-[#f59e0b]';
   return 'bg-[#dc2626]';
 }
@@ -2507,11 +2751,9 @@ function YouTubeMediaKitPanelContent({
   const overview = data.creatorOverview;
   const metrics = data.coreMetrics;
   const scores = data.performanceScores;
-  const audience = data.audienceInsights;
   const brandFit = data.brandFit;
   const content = data.contentAnalysis;
   const sponsorship = data.sponsorshipAnalysis;
-  const safety = data.brandSafety;
   const prediction = data.campaignPrediction;
   const contact = data.contact;
   const frontendMaskedEmail = getFrontendMaskedMediaKitEmail(contact);
@@ -2589,19 +2831,11 @@ function YouTubeMediaKitPanelContent({
               <p className="mt-2 text-lg font-black text-black">
                 {brandFit?.campaignFit || recommendation?.recommendation || 'Brand Match'}
               </p>
-              <div className="mt-7 grid grid-cols-2 gap-6">
-                <div>
-                  <p className="text-xs font-bold uppercase text-[#7a6440]">Authenticity</p>
-                  <p className={`mt-1 text-3xl font-black ${getYouTubeMediaKitScoreTextClass(scores?.authenticityScore)}`}>
-                    {scoreYouTubeMediaKitValue(scores?.authenticityScore)}%
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-bold uppercase text-[#7a6440]">Safety</p>
-                  <p className={`mt-1 text-3xl font-black ${getYouTubeMediaKitScoreTextClass(scores?.brandSafetyScore)}`}>
-                    {scoreYouTubeMediaKitValue(scores?.brandSafetyScore)}%
-                  </p>
-                </div>
+              <div className="mt-7">
+                <p className="text-xs font-bold uppercase text-[#7a6440]">Authenticity</p>
+                <p className={`mt-1 text-3xl font-black ${getYouTubeMediaKitScoreTextClass(scores?.authenticityScore)}`}>
+                  {scoreYouTubeMediaKitValue(scores?.authenticityScore)}%
+                </p>
               </div>
             </div>
           </div>
@@ -2614,56 +2848,30 @@ function YouTubeMediaKitPanelContent({
           <YouTubeMediaKitMetricCard label="Recent upload" value={formatYouTubeMediaKitDate(metrics?.recentUploadDate)} sub={`${metrics?.uploadsLast2Years || 0} uploads in 2 years`} icon={<CalendarDays className="h-5 w-5" />} />
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <YouTubeMediaKitScoreCard icon={<Target className="h-5 w-5" />} label="Relevancy" value={scores?.relevancyScore} hint="Campaign topic and content match" />
-          <YouTubeMediaKitScoreCard icon={<ShieldCheck className="h-5 w-5" />} label="Brand safety" value={scores?.brandSafetyScore} hint={safety?.riskLevel ? `${safety.riskLevel} risk` : 'Risk screening'} />
           <YouTubeMediaKitScoreCard icon={<Users className="h-5 w-5" />} label="Authenticity" value={scores?.authenticityScore} hint="Audience quality" />
           <YouTubeMediaKitScoreCard icon={<TrendingUp className="h-5 w-5" />} label="Consistency" value={scores?.consistencyScore} hint="Upload activity and stability" />
         </div>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-          <YouTubeMediaKitSection title="Audience Insights" icon={<Globe className="h-5 w-5" />}>
-            <div className="space-y-4">
-              {(audience?.estimatedAudienceCountries || []).length ? (
-                audience?.estimatedAudienceCountries?.slice(0, 5).map((item) => (
-                  <div key={item.country}>
-                    <div className="mb-2 flex items-center justify-between text-sm font-bold text-black">
-                      <span>{item.country}</span>
-                      <span>{item.percentage}%</span>
-                    </div>
-                    <YouTubeMediaKitProgress value={item.percentage} />
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm leading-6 text-[#655b4d]">Audience country data is not available for this creator.</p>
-              )}
-              {(audience?.interestCategories || []).length ? (
-                <div className="flex flex-wrap gap-2 pt-2">
-                  {audience?.interestCategories?.slice(0, 12).map((item) => <YouTubeMediaKitPill key={item}>{item}</YouTubeMediaKitPill>)}
-                </div>
-              ) : null}
-            </div>
-          </YouTubeMediaKitSection>
-
-          <YouTubeMediaKitSection title="Brand Fit" icon={<CheckCircle2 className="h-5 w-5" />}>
-            {(brandFit?.whyThisCreatorFits || []).length ? (
-              <ul className="space-y-3">
-                {brandFit?.whyThisCreatorFits?.slice(0, 5).map((item) => (
-                  <li key={item} className="flex gap-3 text-sm leading-6 text-[#655b4d]">
-                    <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#fff3c4] text-[#9a6500]">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                    </span>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm leading-6 text-[#655b4d]">
-                This creator has been matched using campaign topic, performance, safety, and audience signals.
-              </p>
-            )}
-          </YouTubeMediaKitSection>
-        </div>
+        <YouTubeMediaKitSection title="Brand Fit" icon={<CheckCircle2 className="h-5 w-5" />} className="mt-6">
+          {(brandFit?.whyThisCreatorFits || []).length ? (
+            <ul className="space-y-3">
+              {brandFit?.whyThisCreatorFits?.slice(0, 5).map((item) => (
+                <li key={item} className="flex gap-3 text-sm leading-6 text-[#655b4d]">
+                  <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#fff3c4] text-[#9a6500]">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  </span>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm leading-6 text-[#655b4d]">
+              This creator has been matched using campaign topic, performance, and creator profile signals.
+            </p>
+          )}
+        </YouTubeMediaKitSection>
 
         <div className="mt-6 grid gap-6 lg:grid-cols-3">
           <YouTubeMediaKitSection title="Reach & Performance" icon={<BarChart3 className="h-5 w-5" />} className="lg:col-span-2">
@@ -2705,47 +2913,26 @@ function YouTubeMediaKitPanelContent({
           </YouTubeMediaKitSection>
         </div>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_1fr]">
-          <YouTubeMediaKitSection title="Sponsorship Readiness" icon={<Sparkles className="h-5 w-5" />}>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <YouTubeMediaKitMetricCard label="Sponsored videos" value={sponsorship?.sponsoredVideosDetected || 0} />
-              <YouTubeMediaKitMetricCard label="Sponsorship frequency" value={formatYouTubeMediaKitPercent(sponsorship?.sponsorshipFrequency)} />
-              <YouTubeMediaKitMetricCard label="Promo mentions" value={sponsorship?.promoCodeMentions || 0} />
-              <YouTubeMediaKitMetricCard label="Collab readiness" value={sponsorship?.collaborationReadiness || 'Review'} />
+        <YouTubeMediaKitSection title="Sponsorship Readiness" icon={<Sparkles className="h-5 w-5" />} className="mt-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <YouTubeMediaKitMetricCard label="Sponsored videos" value={sponsorship?.sponsoredVideosDetected || 0} />
+            <YouTubeMediaKitMetricCard label="Sponsorship frequency" value={formatYouTubeMediaKitPercent(sponsorship?.sponsorshipFrequency)} />
+            <YouTubeMediaKitMetricCard label="Promo mentions" value={sponsorship?.promoCodeMentions || 0} />
+            <YouTubeMediaKitMetricCard label="Collab readiness" value={sponsorship?.collaborationReadiness || 'Review'} />
+          </div>
+          {(sponsorship?.recentSponsors || []).length ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {sponsorship?.recentSponsors?.slice(0, 8).map((item) => <YouTubeMediaKitPill key={item}>{item}</YouTubeMediaKitPill>)}
             </div>
-            {(sponsorship?.recentSponsors || []).length ? (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {sponsorship?.recentSponsors?.slice(0, 8).map((item) => <YouTubeMediaKitPill key={item}>{item}</YouTubeMediaKitPill>)}
-              </div>
-            ) : null}
-          </YouTubeMediaKitSection>
-
-          <YouTubeMediaKitSection title="Brand Safety" icon={<ShieldCheck className="h-5 w-5" />} className="bg-[#111111] text-white">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-[22px] bg-white/10 p-5">
-                <p className="text-xs font-bold uppercase tracking-[0.15em] text-white/60">Score</p>
-                <p className="mt-2 text-[40px] font-black">{scoreYouTubeMediaKitValue(safety?.score || scores?.brandSafetyScore)}</p>
-              </div>
-              <div className="rounded-[22px] bg-white/10 p-5">
-                <p className="text-xs font-bold uppercase tracking-[0.15em] text-white/60">Risk level</p>
-                <p className="mt-2 text-[28px] font-black capitalize">{safety?.riskLevel || 'Low'}</p>
-              </div>
-            </div>
-            <div className="mt-6 rounded-[16px] border border-white/10 bg-white/10 p-4 text-sm text-white/85">
-              {(safety?.flags || []).length ? safety?.flags?.join(' · ') : 'No major concern detected'}
-            </div>
-          </YouTubeMediaKitSection>
-        </div>
+          ) : null}
+        </YouTubeMediaKitSection>
 
         <YouTubeMediaKitSection title="Proof of Performance" icon={<BarChart3 className="h-5 w-5" />} className="mt-6">
           <div className="grid gap-4 lg:grid-cols-2">
             {(topVideos.length ? topVideos : recentVideos).slice(0, 6).map((video) => (
-              <a
+              <div
                 key={video.videoId || video.url || video.title}
-                href={video.url || '#'}
-                target="_blank"
-                rel="noreferrer"
-                className="grid gap-3 rounded-[20px] border border-[#f1e2c2] bg-[#fffdf9] p-3 transition hover:border-[#e0bd72] sm:grid-cols-[130px_1fr]"
+                className="grid gap-3 rounded-[20px] border border-[#f1e2c2] bg-[#fffdf9] p-3 sm:grid-cols-[130px_1fr]"
               >
                 <div className="aspect-video overflow-hidden rounded-[16px] bg-[#f7efe0]">
                   {video.thumbnail ? (
@@ -2767,7 +2954,7 @@ function YouTubeMediaKitPanelContent({
                     {formatYouTubeMediaKitNumber(video.views)} views · {formatYouTubeMediaKitNumber(video.likes)} likes · {formatYouTubeMediaKitDate(video.publishedAt)}
                   </p>
                 </div>
-              </a>
+              </div>
             ))}
           </div>
         </YouTubeMediaKitSection>
@@ -2804,28 +2991,185 @@ function YouTubeMediaKitPanelContent({
           </div>
         </section>
 
-        {contact?.hasContactInfo || frontendMaskedEmail || contact?.website || (contact?.socialLinks || []).length ? (
-          <YouTubeMediaKitSection title="Contact Signals" icon={<Mail className="h-5 w-5" />} className="mt-6">
-            <div className="rounded-[18px] border border-[#f1e2c2] bg-[#fffaf0] p-4">
-              {frontendMaskedEmail ? (
-                <div className="flex items-center gap-3 text-sm font-semibold text-black"><Mail className="h-4 w-4 text-[#9a6500]" /> {frontendMaskedEmail}</div>
-              ) : null}
-              {contact?.website ? (
-                <div className="mt-3 flex items-center gap-3 break-all text-sm font-semibold text-black"><Globe className="h-4 w-4 text-[#9a6500]" /> {contact.website}</div>
-              ) : null}
-              {(contact?.socialLinks || []).length ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {(contact?.socialLinks || []).map((link) => <YouTubeMediaKitPill key={`${link.platform}-${link.url}`}>{link.platform}</YouTubeMediaKitPill>)}
-                </div>
-              ) : null}
-            </div>
-          </YouTubeMediaKitSection>
-        ) : null}
       </div>
     </div>
   );
 }
 
+
+
+function getAdvancedAudiencePercent(value: any) {
+  const n = toNumber(value);
+
+  if (!Number.isFinite(n) || n <= 0) return 0;
+
+  const percent = n <= 1 ? n * 100 : n;
+  return Math.max(0, Math.min(100, Math.round(percent * 10) / 10));
+}
+
+function YouTubeAdvancedAnalyticsPanel({
+  loading,
+  error,
+  report,
+  fetchedAt,
+}: {
+  loading: boolean;
+  error: string | null;
+  report: InfluencerReport | null;
+  fetchedAt?: string | null;
+}) {
+  if (loading) {
+    return (
+      <YouTubeMediaKitSection
+        title="Graphs & Insights"
+        icon={<BarChart3 className="h-5 w-5" />}
+        className="mt-6"
+      >
+        <div className="flex items-center gap-3 rounded-[18px] bg-[#fff8e6] p-4 text-sm font-semibold text-[#7a5a16]">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          Loading Modash graphs and insights...
+        </div>
+      </YouTubeMediaKitSection>
+    );
+  }
+
+  if (error) {
+    return (
+      <YouTubeMediaKitSection
+        title="Graphs & Insights"
+        icon={<BarChart3 className="h-5 w-5" />}
+        className="mt-6"
+      >
+        <div className="rounded-[18px] border border-red-100 bg-red-50 p-4 text-sm text-red-700">
+          {error}
+        </div>
+      </YouTubeMediaKitSection>
+    );
+  }
+
+  if (!report) return null;
+
+  const followers = toNumber(report.followers || report.stats?.followers?.value);
+  const avgViews = toNumber(
+    report.avgViews ||
+      report.avgReelsPlays ||
+      report.stats?.avgViews?.value
+  );
+  const avgLikes = toNumber(report.avgLikes || report.stats?.avgLikes?.value);
+  const credibilityScore = getAdvancedAudiencePercent(report.audience?.credibility);
+
+  const recentPosts = Array.isArray(report.recentPosts) ? report.recentPosts : [];
+  const popularPosts = Array.isArray(report.popularPosts) ? report.popularPosts : [];
+  const statHistorySource = pickBestTrendHistory(
+    report.statHistory,
+    (report as any)?.statsByContentType?.all?.statHistory,
+    (report as any)?.statsByContentType?.reels?.statHistory,
+    (report as any)?.profile?.statHistory
+  );
+
+  const trendData = (() => {
+    if (statHistorySource.length) {
+      const normalizedHistory = statHistorySource.map(normalizeTrendPoint);
+      const labels = normalizedHistory.map((item, index) =>
+        parseMonthLabel(String(item.month || ''), index)
+      );
+
+      const hasFollowersHistory = normalizedHistory.some((item) => item.followers > 0);
+      const hasViewsHistory = normalizedHistory.some((item) => item.avgViews > 0);
+
+      return {
+        organicTrend: normalizedHistory.map((item) => item.avgLikes),
+        sponsoredTrend: hasFollowersHistory
+          ? normalizedHistory.map((item) => item.followers)
+          : hasViewsHistory
+            ? normalizedHistory.map((item) => item.avgViews)
+            : [],
+        trendLabels: labels,
+        secondaryTrendLabel: hasFollowersHistory || followers > 0 ? 'Followers' : 'Avg Views',
+      };
+    }
+
+    const fallbackPosts = recentPosts.slice(0, 12);
+    const labels = fallbackPosts.map((post, index) =>
+      parseMonthLabel(
+        String(post?.createdAt ?? post?.publishedAt ?? post?.date ?? ''),
+        index
+      )
+    );
+
+    return {
+      organicTrend: fallbackPosts.map((post) => toNumber(post?.likes)),
+      sponsoredTrend: fallbackPosts.map((post) =>
+        toNumber(post?.views ?? post?.plays ?? post?.likes)
+      ),
+      trendLabels: labels.length ? labels : undefined,
+      secondaryTrendLabel: 'Views',
+    };
+  })();
+
+  const audienceAge = (report.audience?.ages ?? []).map((item: any) => ({
+    label: item.code,
+    value: getAdvancedAudiencePercent(item.weight ?? item.value),
+  }));
+
+  const audienceGender = (report.audience?.genders ?? []).map((item: any) => ({
+    label:
+      item.code === 'MALE'
+        ? 'Male'
+        : item.code === 'FEMALE'
+          ? 'Female'
+          : item.code,
+    value: getAdvancedAudiencePercent(item.weight ?? item.value),
+  }));
+
+  const topCountries = (report.audience?.geoCountries ?? [])
+    .slice(0, 4)
+    .map((item: any) => ({
+      name: item.name || item.code || 'Unknown',
+      value: getAdvancedAudiencePercent(item.weight ?? item.value),
+    }));
+
+  const topLanguages = (report.audience?.languages ?? [])
+    .slice(0, 4)
+    .map((item: any) => ({
+      label: item.name || item.code || 'Unknown',
+      value: getAdvancedAudiencePercent(item.weight ?? item.value),
+    }));
+
+  return (
+    <div className="mt-6 space-y-6">
+      <PerformanceTrendCard
+        key="youtube-media-kit-performance-trend"
+        organicTrend={trendData.organicTrend}
+        sponsoredTrend={trendData.sponsoredTrend}
+        trendLabels={trendData.trendLabels}
+        statHistory={statHistorySource.map(normalizeTrendPoint)}
+        secondaryLabel={trendData.secondaryTrendLabel}
+        primaryValue={avgLikes}
+        secondaryValue={trendData.secondaryTrendLabel === 'Followers' ? followers : avgViews}
+      />
+
+      <AudienceIntelligenceCard
+        ageData={audienceAge}
+        genderData={audienceGender}
+        topCountries={topCountries}
+        credibilityScore={credibilityScore}
+        topLanguages={topLanguages}
+      />
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_420px]">
+        <RecentPostsTable
+          posts={recentPosts.slice(0, 5).map((post) => ({ ...post, url: undefined }))}
+        />
+        <PopularContentPanel
+          posts={(popularPosts.length ? popularPosts : recentPosts)
+            .slice(0, 2)
+            .map((post) => ({ ...post, url: undefined }))}
+        />
+      </div>
+    </div>
+  );
+}
 
 export const DetailPanel = React.memo<DetailPanelProps>(
   ({
@@ -2894,6 +3238,13 @@ export const DetailPanel = React.memo<DetailPanelProps>(
     const [youtubeMediaKit, setYoutubeMediaKit] = useState<YouTubeMediaKitData | null>(null);
     const [youtubeMediaKitLoading, setYoutubeMediaKitLoading] = useState(false);
     const [youtubeMediaKitError, setYoutubeMediaKitError] = useState<string | null>(null);
+    const [youtubeAdvancedReport, setYoutubeAdvancedReport] =
+      useState<InfluencerReport | null>(null);
+    const [youtubeAdvancedLoading, setYoutubeAdvancedLoading] = useState(false);
+    const [youtubeAdvancedError, setYoutubeAdvancedError] = useState<string | null>(null);
+    const [youtubeAdvancedFetchedAt, setYoutubeAdvancedFetchedAt] = useState<string | null>(null);
+    const [youtubeAdvancedRequested, setYoutubeAdvancedRequested] = useState(false);
+    const youtubeAdvancedRequestRef = useRef(0);
 
     const rateCardRequestKeyRef = useRef("");
 
@@ -3003,127 +3354,16 @@ export const DetailPanel = React.memo<DetailPanelProps>(
     useEffect(() => {
       if (!open) {
         setHasAnyEmail(null);
+        setCheckingEmail(false);
         return;
       }
 
-      const normalizedPlatform = (platform ?? '').toLowerCase() as Platform;
-      if (
-        !normalizedPlatform ||
-        !['youtube', 'instagram', 'tiktok'].includes(normalizedPlatform)
-      ) {
-        setHasAnyEmail(null);
-        return;
-      }
-
-      const rawHandle = handle ? String(handle).trim() : '';
-      const safeHandle = rawHandle
-        ? '@' + rawHandle.replace(/^@/, '').trim().toLowerCase()
-        : '';
-
-      if (!safeHandle || !/^[A-Za-z0-9._-]+$/.test(safeHandle.replace(/^@/, ''))) {
-        setHasAnyEmail(null);
-        return;
-      }
-
-      let cancelled = false;
-      setCheckingEmail(true);
-
-      (async () => {
-        try {
-          const { email } = await resolveCreatorEmail(safeHandle, normalizedPlatform);
-          if (!cancelled) {
-            setHasAnyEmail(!!email);
-          }
-        } catch (err) {
-          console.error('Failed to pre-check email status', err);
-          if (!cancelled) {
-            setHasAnyEmail(null);
-          }
-        } finally {
-          if (!cancelled) {
-            setCheckingEmail(false);
-          }
-        }
-      })();
-
-      return () => {
-        cancelled = true;
-      };
-    }, [open, handle, platform]);
-
-    useEffect(() => {
-      if (!open || !brandId) {
-        setInvitedCampaignIds(new Set());
-        return;
-      }
-
-      const rawPlatformValue = String(platform ?? '').toLowerCase();
-
-      if (!['youtube', 'instagram', 'tiktok'].includes(rawPlatformValue)) {
-        setInvitedCampaignIds(new Set());
-        return;
-      }
-
-      const normalizedPlatform = normalizePlatform(platform);
-      const rawHandle = handle ? String(handle).trim() : '';
-      const safeHandle = rawHandle
-        ? rawHandle.startsWith('@')
-          ? rawHandle.toLowerCase()
-          : `@${rawHandle.toLowerCase()}`
-        : '';
-
-      if (!safeHandle || !/^[A-Za-z0-9._-]+$/.test(safeHandle.replace(/^@/, ''))) {
-        setInvitedCampaignIds(new Set());
-        return;
-      }
-
-      let cancelled = false;
-
-      (async () => {
-        try {
-          setCheckingInvitation(true);
-
-          const resp = await post<InvitationListResp>('/newinvitations/list', {
-            brandId,
-            handle: safeHandle,
-            platform: normalizedPlatform,
-            status: 'invited',
-            page: 1,
-            limit: 200,
-          });
-
-          if (cancelled) return;
-
-          const invitedIds = new Set(
-            (Array.isArray(resp?.data) ? resp.data : [])
-              .filter((item) => String(item?.status || '').toLowerCase() === 'invited')
-              .map(getInvitationCampaignId)
-              .filter(Boolean)
-          );
-
-          setInvitedCampaignIds(invitedIds);
-
-          setSelectedCampaignIds((prev) => {
-            if (campaignId) return [campaignId];
-            return prev.filter((id) => !invitedIds.has(id));
-          });
-        } catch (err) {
-          console.error('Failed to fetch invitation list', err);
-
-          if (!cancelled) {
-            setInvitedCampaignIds(new Set());
-          }
-        } finally {
-          if (!cancelled) {
-            setCheckingInvitation(false);
-          }
-        }
-      })();
-
-      return () => {
-        cancelled = true;
-      };
-    }, [open, brandId, handle, platform, campaignId]);
+      // New invitation flow:
+      // Do not fetch or expose influencer email on frontend.
+      // Email is resolved privately in backend by channelId when invitation is submitted.
+      setHasAnyEmail(null);
+      setCheckingEmail(false);
+    }, [open]);
 
     const formattedLastUpdated = lastUpdatedAt
       ? new Date(lastUpdatedAt).toLocaleString()
@@ -3248,17 +3488,218 @@ export const DetailPanel = React.memo<DetailPanelProps>(
       youtubeMediaKitQueryValues.country,
     ]);
 
-    const getActiveSafeHandle = () => {
-      const rawHandle = String(
-        selectedReport?.handle ?? selectedReport?.username ?? handle ?? ''
-      ).trim();
+    useEffect(() => {
+      youtubeAdvancedRequestRef.current += 1;
+      setYoutubeAdvancedRequested(false);
+      setYoutubeAdvancedReport(null);
+      setYoutubeAdvancedError(null);
+      setYoutubeAdvancedFetchedAt(null);
+      setYoutubeAdvancedLoading(false);
+    }, [open, isYouTubeMediaKitMode, youtubeChannelIdForPanel, brandId]);
 
-      return rawHandle
-        ? `@${rawHandle.replace(/^@/, '').trim().toLowerCase()}`
-        : '';
+    const handleShowYouTubeAdvancedAnalytics = async () => {
+      if (!youtubeChannelIdForPanel) {
+        await Swal.fire(
+          'Missing YouTube channel',
+          'Could not load advanced analytics because the YouTube channel ID was not found.',
+          'warning'
+        );
+        return;
+      }
+
+      const requestId = youtubeAdvancedRequestRef.current + 1;
+      youtubeAdvancedRequestRef.current = requestId;
+
+      try {
+        setYoutubeAdvancedRequested(true);
+        setYoutubeAdvancedLoading(true);
+        setYoutubeAdvancedError(null);
+        setYoutubeAdvancedReport(null);
+        setYoutubeAdvancedFetchedAt(null);
+
+        const result = await fetchDetailPanelYouTubeAdvancedAnalytics({
+          channelId: youtubeChannelIdForPanel,
+          brandId,
+          calculationMethod: 'average',
+        });
+
+        if (youtubeAdvancedRequestRef.current !== requestId) return;
+
+        setYoutubeAdvancedReport(result.report);
+        setYoutubeAdvancedFetchedAt(result.fetchedAt);
+        setLastUpdatedAt(result.fetchedAt);
+      } catch (err: any) {
+        if (youtubeAdvancedRequestRef.current !== requestId) return;
+
+        setYoutubeAdvancedReport(null);
+        setYoutubeAdvancedFetchedAt(null);
+
+        if (isReportLimitExceededError(err)) {
+          onReportLimitExceeded?.();
+        }
+
+        setYoutubeAdvancedError(
+          err?.message || 'Failed to load YouTube advanced analytics'
+        );
+      } finally {
+        if (youtubeAdvancedRequestRef.current === requestId) {
+          setYoutubeAdvancedLoading(false);
+        }
+      }
+    };
+
+    const getActiveYoutubeChannelId = (preferDraft = false) => {
+      return String(
+        (preferDraft ? emailDraft?.channelId : '') ||
+          youtubeChannelIdForPanel ||
+          youtubeChannelIdProp ||
+          queryChannelId ||
+          (selectedReport as any)?.channelId ||
+          (selectedReport as any)?.youtubeChannelId ||
+          selectedReport?.modashId ||
+          (raw as any)?.channelId ||
+          (raw as any)?.userId ||
+          (raw as any)?.profile?.channelId ||
+          (raw as any)?.profile?.userId ||
+          (data as any)?.channelId ||
+          (data as any)?.profile?.channelId ||
+          (data as any)?.profile?.userId ||
+          ''
+      ).trim();
+    };
+
+    const displayName = String(
+      youtubeMediaKit?.creatorOverview?.creatorName ||
+        youtubeMediaKit?.creatorOverview?.channelName ||
+        selectedReport?.name ||
+        selectedReport?.fullname ||
+        selectedReport?.username ||
+        handle ||
+        'Creator profile'
+    ).trim();
+
+    const displayHandle = getSafeCreatorHandle({
+      selectedReport,
+      raw,
+      data,
+      handle,
+    });
+
+    const editorToLabel = getCreatorToLabel({
+      selectedReport,
+      raw,
+      data,
+      handle,
+      displayName,
+    });
+
+    const getActiveSafeHandle = () => {
+      return getBackendInvitationHandle({
+        selectedReport,
+        raw,
+        data,
+        handle,
+        displayName,
+        editorToLabel,
+        channelId: getActiveYoutubeChannelId(true),
+      });
     };
 
     const getActivePlatform = () => activePlatformKey as Platform;
+
+    useEffect(() => {
+      if (!open || !brandId) {
+        setInvitedCampaignIds(new Set());
+        return;
+      }
+
+      const normalizedPlatform = getActivePlatform();
+
+      if (normalizedPlatform !== 'youtube') {
+        setInvitedCampaignIds(new Set());
+        return;
+      }
+
+      const activeYoutubeChannelId = getActiveYoutubeChannelId(false);
+
+      const safeHandle = getBackendInvitationHandle({
+        selectedReport,
+        raw,
+        data,
+        handle,
+        displayName,
+        editorToLabel,
+        channelId: activeYoutubeChannelId,
+      });
+
+      if (
+        !safeHandle ||
+        !/^[A-Za-z0-9._-]+$/.test(safeHandle.replace(/^@/, ''))
+      ) {
+        setInvitedCampaignIds(new Set());
+        return;
+      }
+
+      let cancelled = false;
+
+      (async () => {
+        try {
+          setCheckingInvitation(true);
+
+          const resp = await post<InvitationListResp>('/newinvitations/list', {
+            brandId,
+            handle: safeHandle,
+            platform: 'youtube',
+            status: 'invited',
+            page: 1,
+            limit: 200,
+          });
+
+          if (cancelled) return;
+
+          const invitedIds = new Set(
+            (Array.isArray(resp?.data) ? resp.data : [])
+              .filter((item) => String(item?.status || '').toLowerCase() === 'invited')
+              .map(getInvitationCampaignId)
+              .filter(Boolean)
+          );
+
+          setInvitedCampaignIds(invitedIds);
+
+          setSelectedCampaignIds((prev) => {
+            if (campaignId) return [campaignId];
+            return prev.filter((id) => !invitedIds.has(id));
+          });
+        } catch (err) {
+          console.error('Failed to fetch invitation list', err);
+
+          if (!cancelled) {
+            setInvitedCampaignIds(new Set());
+          }
+        } finally {
+          if (!cancelled) {
+            setCheckingInvitation(false);
+          }
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [
+      open,
+      brandId,
+      handle,
+      campaignId,
+      selectedReport,
+      raw,
+      data,
+      displayName,
+      editorToLabel,
+      youtubeChannelIdForPanel,
+      youtubeChannelIdProp,
+      queryChannelId,
+    ]);
 
     const activeAvailableProfiles = useMemo<InfluencerReport[]>(() => {
       if (selectedLookalikeReport) return [selectedLookalikeReport];
@@ -3945,28 +4386,13 @@ export const DetailPanel = React.memo<DetailPanelProps>(
       !checkingInvitation &&
       !isCurrentInviteAlreadySent;
 
-    const effectiveHasEmail =
-      hasAnyEmail !== null ? hasAnyEmail : emailExists === true;
+    const effectiveHasEmail = false;
 
     const ctaTitle = hasUserId
       ? isCurrentInviteAlreadySent
         ? 'Already invited for this campaign'
-        : effectiveHasEmail
-          ? 'Message this creator'
-          : 'Send invitation to collect email'
+        : 'Send invitation'
       : 'Profile not ready';
-
-    const displayName =
-      selectedReport?.name ??
-      selectedReport?.fullname ??
-      selectedReport?.username ??
-      handle ??
-      'Creator profile';
-
-    const displayHandle =
-      selectedReport?.handle ??
-      (handle && (handle.startsWith('@') ? handle : `@${handle}`)) ??
-      '';
 
     const handleRefreshData = async (e: React.MouseEvent) => {
       e.preventDefault();
@@ -4105,8 +4531,6 @@ export const DetailPanel = React.memo<DetailPanelProps>(
       chosenCampaignIds?: string[],
       editorPayload?: EmailEditorPayload
     ) => {
-      const safeHandle = getActiveSafeHandle();
-
       if (!brandId) {
         await Swal.fire(
           'Missing brand',
@@ -4116,20 +4540,12 @@ export const DetailPanel = React.memo<DetailPanelProps>(
         return;
       }
 
-      const normalizedPlatform = (platform ?? '').toLowerCase() as Platform;
+      const normalizedPlatform = getActivePlatform();
 
-      if (
-        !normalizedPlatform ||
-        !['youtube', 'instagram', 'tiktok'].includes(normalizedPlatform)
-      ) {
-        await Swal.fire('Unsupported platform', 'Unsupported or missing platform.', 'warning');
-        return;
-      }
-
-      if (!safeHandle || !/^[A-Za-z0-9._-]+$/.test(safeHandle.replace(/^@/, ''))) {
+      if (normalizedPlatform !== 'youtube') {
         await Swal.fire(
-          'Invalid handle',
-          'Invalid or missing handle to send invitation.',
+          'Unsupported platform',
+          'Only YouTube invitation flow is supported here.',
           'warning'
         );
         return;
@@ -4148,107 +4564,99 @@ export const DetailPanel = React.memo<DetailPanelProps>(
         return;
       }
 
+      const activeYoutubeChannelId = getActiveYoutubeChannelId(true);
+
+      if (!activeYoutubeChannelId) {
+        await Swal.fire(
+          'Missing channel ID',
+          'Could not send invitation because YouTube channelId was not found.',
+          'warning'
+        );
+        return;
+      }
+
+      const safeHandle = getBackendInvitationHandle({
+        selectedReport,
+        raw,
+        data,
+        handle,
+        displayName,
+        editorToLabel: emailDraft?.toLabel || editorToLabel,
+        channelId: activeYoutubeChannelId,
+      });
+
+      if (
+        !safeHandle ||
+        !/^[A-Za-z0-9._-]+$/.test(safeHandle.replace(/^@/, ''))
+      ) {
+        await Swal.fire(
+          'Invalid handle',
+          'Could not create a valid creator handle. Please refresh this creator profile and try again.',
+          'warning'
+        );
+        return;
+      }
+
       const creatorUserId = getInfluencerUserIdForInvitation({
         selectedReport,
         raw,
         data,
       });
 
-      if (!creatorUserId) {
-        await Swal.fire(
-          'Missing user ID',
-          'Could not send invitation because influencer userId was not found.',
-          'warning'
-        );
-        return;
-      }
-
       try {
         setSendingInvite(true);
 
-        const recipientEmail = String(
-          editorPayload?.recipientEmail ||
-          editorPayload?.influencerEmail ||
-          editorPayload?.creatorEmail ||
-          editorPayload?.businessEmail ||
-          editorPayload?.contactEmail ||
-          editorPayload?.to ||
-          emailDraft?.toEmail ||
-          ''
-        ).trim();
-
         const fromEmail = String(
           editorPayload?.fromEmail ||
-          emailDraft?.fromEmail ||
-          ''
+            emailDraft?.fromEmail ||
+            ''
         ).trim();
 
         const fromName = String(
           editorPayload?.fromName ||
-          emailDraft?.fromName ||
-          'CollabGlam'
-        ).trim();
-
-        const activeYoutubeChannelId = String(
-          youtubeChannelIdForPanel ||
-          youtubeChannelIdProp ||
-          queryChannelId ||
-          creatorUserId ||
-          ''
+            emailDraft?.fromName ||
+            'CollabGlam'
         ).trim();
 
         const resp = await post<InvitationCreateResp>('/newinvitations/create', {
           handle: safeHandle,
-          platform: normalizedPlatform,
+          platform: 'youtube',
           brandId,
           status: 'invited',
 
           campaignIds,
-
-          userId: creatorUserId,
-          modashUserId: creatorUserId,
-
           campaignName,
 
-          ...(activeYoutubeChannelId
-            ? {
-              channelId: activeYoutubeChannelId,
-              youtubeChannelId: activeYoutubeChannelId,
-            }
-            : {}),
+          ...(creatorUserId ? { userId: creatorUserId } : {}),
+
+          // Backend privately fetches the real email from InfoMediaKit using this.
+          channelId: activeYoutubeChannelId,
+          youtubeChannelId: activeYoutubeChannelId,
 
           ...(emailDraft?.missingEmailId
             ? {
-              missingEmailId: emailDraft.missingEmailId,
-            }
+                missingEmailId: emailDraft.missingEmailId,
+              }
             : {}),
 
-          ...(recipientEmail
-            ? {
-              recipientEmail,
-              influencerEmail: recipientEmail,
-              creatorEmail: recipientEmail,
-              businessEmail: recipientEmail,
-              contactEmail: recipientEmail,
-            }
-            : {}),
-
+          // Do not send recipientEmail/influencerEmail/creatorEmail from frontend.
           emailTemplate: editorPayload
             ? {
-              subject: editorPayload.subject,
-              body: editorPayload.body,
-              htmlBody: editorPayload.htmlBody,
-              attachments: editorPayload.attachments,
-              fromEmail,
-              fromName,
-            }
+                subject: editorPayload.subject,
+                body: editorPayload.body,
+                htmlBody: editorPayload.htmlBody,
+                attachments: editorPayload.attachments,
+                fromEmail,
+                fromName,
+              }
             : undefined,
         });
 
         if (!resp || resp.status === 'error') {
           await Swal.fire(
             'Something went wrong',
-            resp?.message || 'We couldn’t send the invitation. Please try again in a moment.',
+            resp?.message ||
+              'We couldn’t send the invitation. Please try again in a moment.',
             'error'
           );
           return;
@@ -4288,29 +4696,35 @@ export const DetailPanel = React.memo<DetailPanelProps>(
 
         const uniqueSkipReason = [...new Set(emailSkipReasons)].filter(Boolean)[0];
 
-        const emailSummary = editorPayload
-          ? emailSentCount > 0
+        const emailSummary =
+          emailSentCount > 0
             ? `${emailSentCount} email${emailSentCount > 1 ? 's' : ''} sent.`
-            : uniqueSkipReason || 'Invitation saved, but email was not sent.'
-          : '';
+            : uniqueSkipReason ||
+              'Invitation saved. Email was not found, so creator was added to missing email.';
 
         if (savedCount > 0 && existsCount === 0) {
           await Swal.fire(
             emailSentCount > 0 ? 'Invitation email sent' : 'Invitation saved',
-            `Processed ${savedCount} campaign${savedCount > 1 ? 's' : ''}. ${emailSummary}`.trim(),
-            emailSentCount > 0 || !editorPayload ? 'success' : 'warning'
+            `Processed ${savedCount} campaign${
+              savedCount > 1 ? 's' : ''
+            }. ${emailSummary}`.trim(),
+            emailSentCount > 0 ? 'success' : 'warning'
           );
         } else if (savedCount === 0 && existsCount > 0) {
           await Swal.fire(
             emailSentCount > 0 ? 'Invitation email sent' : 'Already invited',
-            `This creator was already invited for ${existsCount} campaign${existsCount > 1 ? 's' : ''}. ${emailSummary}`.trim(),
+            `This creator was already invited for ${existsCount} campaign${
+              existsCount > 1 ? 's' : ''
+            }. ${emailSummary}`.trim(),
             emailSentCount > 0 ? 'success' : 'info'
           );
         } else {
           await Swal.fire(
             'Invitations processed',
-            `${savedCount} new invitation${savedCount > 1 ? 's' : ''} processed, ${existsCount} already existed. ${emailSummary}`.trim(),
-            emailSentCount > 0 || !editorPayload ? 'success' : 'warning'
+            `${savedCount} new invitation${
+              savedCount > 1 ? 's' : ''
+            } processed, ${existsCount} already existed. ${emailSummary}`.trim(),
+            emailSentCount > 0 ? 'success' : 'warning'
           );
         }
 
@@ -4329,7 +4743,6 @@ export const DetailPanel = React.memo<DetailPanelProps>(
     };
 
     const handleTemplatePreview = async (chosenCampaignIds?: string[]) => {
-      const safeHandle = getActiveSafeHandle();
       const normalizedPlatform = getActivePlatform();
 
       if (!brandId) {
@@ -4341,22 +4754,17 @@ export const DetailPanel = React.memo<DetailPanelProps>(
         return;
       }
 
-      if (!normalizedPlatform || !['youtube', 'instagram', 'tiktok'].includes(normalizedPlatform)) {
-        await Swal.fire('Unsupported platform', 'Unsupported or missing platform.', 'warning');
-        return;
-      }
-
-      if (!safeHandle || !/^[A-Za-z0-9._-]+$/.test(safeHandle.replace(/^@/, ''))) {
+      if (normalizedPlatform !== 'youtube') {
         await Swal.fire(
-          'Invalid handle',
-          'Invalid or missing handle to preview invitation.',
+          'Unsupported platform',
+          'Only YouTube invitation flow is supported here.',
           'warning'
         );
         return;
       }
 
       const campaignIds = Array.isArray(chosenCampaignIds)
-        ? chosenCampaignIds.filter(Boolean)
+        ? [...new Set(chosenCampaignIds.filter(Boolean))]
         : [];
 
       if (!campaignIds.length) {
@@ -4368,66 +4776,110 @@ export const DetailPanel = React.memo<DetailPanelProps>(
         return;
       }
 
-      try {
-        setSendingInvite(true);
-        const previewResp = await post<CampaignInvitationTemplatePreviewResp>(
-          '/campaign-invitation/template-preview',
-          {
-            brandId,
-            campaignIds,
-            campaignName,
-            platform: normalizedPlatform,
-            handle: safeHandle,
-          }
-        );
+      const activeYoutubeChannelId = getActiveYoutubeChannelId(false);
 
-        if (!previewResp || previewResp.status !== 'success') {
-          await Swal.fire(
-            'Preview unavailable',
-            previewResp?.message || 'Could not generate the invitation preview.',
-            'error'
-          );
-          return;
-        }
-
-        const fromEmail = String(previewResp.fromEmail || '').trim();
-        const fromName = getFromNameFromEmail(fromEmail);
-        const resolvedDraft = buildResolvedTemplateDraft(
-          previewResp,
-          displayName,
-          displayHandle || safeHandle,
-          fromName
-        );
-
-        const resolvedToEmail = String(previewResp.toEmail || "").trim();
-
-        const nextDraft: EmailDraftState = {
-          campaignIds,
-          fromEmail,
-          fromName,
-          toLabel: String(resolvedToEmail || displayHandle || safeHandle).trim(),
-          toEmail: resolvedToEmail,
-          missingEmailId: previewResp.missingEmailId || null,
-          subject: resolvedDraft.subject,
-          initialBody: resolvedDraft.textBody,
-          initialHtmlBody: resolvedDraft.htmlBody,
-        };
-
-        setEmailDraft(nextDraft);
-        setCampaignPickerOpen(false);
-        setEmailEditorOpen(true);
-      } catch (err: any) {
-        console.error('Template preview failed', err);
+      if (!activeYoutubeChannelId) {
         await Swal.fire(
-          'Preview unavailable',
-          err?.response?.data?.message ||
-          err?.message ||
-          'Could not generate the invitation preview.',
-          'error'
+          'Missing channel ID',
+          'Could not prepare invitation because YouTube channelId was not found.',
+          'warning'
         );
-      } finally {
-        setSendingInvite(false);
+        return;
       }
+
+      const safeHandle = getBackendInvitationHandle({
+        selectedReport,
+        raw,
+        data,
+        handle,
+        displayName,
+        editorToLabel,
+        channelId: activeYoutubeChannelId,
+      });
+
+      if (
+        !safeHandle ||
+        !/^[A-Za-z0-9._-]+$/.test(safeHandle.replace(/^@/, ''))
+      ) {
+        await Swal.fire(
+          'Invalid handle',
+          'Could not create a valid creator handle. Please refresh this creator profile and try again.',
+          'warning'
+        );
+        return;
+      }
+
+      const selectedCampaignTitles = campaignIds
+        .map((id) => {
+          const matchedCampaign = brandCampaigns.find(
+            (item) => String(item.campaignId) === String(id)
+          );
+
+          return String(
+            matchedCampaign?.campaignTitle ||
+              (String(id) === String(campaignId) ? campaignName : '') ||
+              ''
+          ).trim();
+        })
+        .filter(Boolean);
+
+      const firstCampaignTitle =
+        selectedCampaignTitles[0] ||
+        campaignName ||
+        'your campaign';
+
+      const campaignTitleText =
+        selectedCampaignTitles.length > 1
+          ? selectedCampaignTitles.join(', ')
+          : firstCampaignTitle;
+
+      const creatorName =
+        displayName && !isYouTubeChannelId(displayName)
+          ? displayName
+          : editorToLabel.replace(/^@/, '') || 'Creator';
+
+      const fromName = 'CollabGlam';
+      const fromEmail = '';
+
+      const subject = `Invitation to Collaborate - ${firstCampaignTitle}`;
+
+      const initialBody = `Dear ${creatorName},
+
+I hope you are doing well.
+
+We would like to invite you to collaborate with us for ${campaignTitleText}.
+
+Campaign Details
+
+Campaign Name: ${campaignTitleText}
+Platform: YouTube
+
+Please review this invitation and let us know if you are interested. More campaign details will be shared by the brand team.
+
+Warm regards,
+Team CollabGlam`;
+
+      const nextDraft: EmailDraftState = {
+        campaignIds,
+        fromEmail,
+        fromName,
+
+        // Show creator handle/name only. Never show real email or UC channel ID here.
+        toLabel: editorToLabel,
+        toEmail: '',
+
+        // Keep channelId privately for backend email lookup.
+        channelId: activeYoutubeChannelId,
+        missingEmailId: null,
+
+        subject,
+        initialBody,
+        initialHtmlBody: plainTextToHtml(initialBody),
+      };
+
+      setEmailDraft(nextDraft);
+      setCampaignPickerOpen(false);
+      setEmailEditorOpen(true);
     };
 
     const handleCampaignPickerToggle = async (e: React.MouseEvent) => {
@@ -4590,9 +5042,6 @@ export const DetailPanel = React.memo<DetailPanelProps>(
 
       if (!canAct || sendingInvite) return;
 
-      const safeHandle = getActiveSafeHandle();
-      const normalizedPlatform = getActivePlatform();
-
       if (!brandId) {
         await Swal.fire(
           'Missing brand',
@@ -4602,22 +5051,12 @@ export const DetailPanel = React.memo<DetailPanelProps>(
         return;
       }
 
-      if (
-        !normalizedPlatform ||
-        !['youtube', 'instagram', 'tiktok'].includes(normalizedPlatform)
-      ) {
+      const normalizedPlatform = getActivePlatform();
+
+      if (normalizedPlatform !== 'youtube') {
         await Swal.fire(
           'Unsupported platform',
-          'Unsupported or missing platform.',
-          'warning'
-        );
-        return;
-      }
-
-      if (!safeHandle || !/^[A-Za-z0-9._-]+$/.test(safeHandle.replace(/^@/, ''))) {
-        await Swal.fire(
-          'Invalid handle',
-          'Invalid or missing handle to send invitation.',
+          'Only YouTube invitation flow is supported here.',
           'warning'
         );
         return;
@@ -4634,99 +5073,7 @@ export const DetailPanel = React.memo<DetailPanelProps>(
         return;
       }
 
-      const creatorUserId = getInfluencerUserIdForInvitation({
-        selectedReport,
-        raw,
-        data,
-      });
-
-      if (!creatorUserId) {
-        await Swal.fire(
-          'Missing user ID',
-          'Could not send invitation because influencer userId was not found.',
-          'warning'
-        );
-        return;
-      }
-
-      try {
-        setSendingInvite(true);
-
-        const resp = await post<InvitationCreateResp>('/newinvitations/create', {
-          handle: safeHandle,
-          platform: normalizedPlatform,
-          brandId,
-          status: 'invited',
-
-          // New backend accepts campaignIds even for one campaign
-          campaignIds,
-
-          // Store influencer id
-          userId: creatorUserId,
-          modashUserId: creatorUserId,
-
-          campaignName,
-        });
-
-        if (!resp || resp.status === 'error') {
-          await Swal.fire(
-            'Something went wrong',
-            resp?.message || 'We couldn’t send the invitation. Please try again in a moment.',
-            'error'
-          );
-          return;
-        }
-
-        const savedCount =
-          Number(resp.createdCount ?? 0) ||
-          (resp.status === 'saved' ? campaignIds.length : 0);
-
-        const existsCount =
-          Number(resp.existingCount ?? 0) ||
-          (resp.status === 'exists' ? campaignIds.length : 0);
-
-        if (savedCount > 0) {
-          await Swal.fire(
-            'Invitation sent',
-            `Invitation saved for ${savedCount} campaign${savedCount > 1 ? 's' : ''}.`,
-            'success'
-          );
-        } else if (existsCount > 0) {
-          await Swal.fire(
-            'Already invited',
-            `This creator is already invited for ${existsCount} campaign${existsCount > 1 ? 's' : ''}.`,
-            'info'
-          );
-        } else {
-          await Swal.fire(
-            'Invitation processed',
-            resp.message || 'Invitation processed successfully.',
-            'success'
-          );
-        }
-
-        setInvitedCampaignIds((prev) => {
-          const next = new Set(prev);
-          campaignIds.forEach((id) => next.add(id));
-          return next;
-        });
-
-        setSelectedCampaignIds((prev) =>
-          prev.filter((id) => !campaignIds.includes(id))
-        );
-
-        router.push('/brand/invited');
-      } catch (err: any) {
-        const msg =
-          err?.response?.data?.message ||
-          err?.message ||
-          'Failed to send invitation';
-
-        console.error(err);
-        await Swal.fire('Error', msg, 'error');
-      } finally {
-        setSendingInvite(false);
-      }
+      await handleTemplatePreview(campaignIds);
     };
 
     const handleCopy = async () => {
@@ -4963,96 +5310,11 @@ export const DetailPanel = React.memo<DetailPanelProps>(
                           if (isCurrentInviteAlreadySent) return;
 
                           if (activeInviteCampaignIds.length) {
-                            const selectedCampaign =
-                              activeCampaignForPanel ||
-                              brandCampaigns.find(
-                                (item) => item.campaignId === activeInviteCampaignIds[0]
-                              );
-
-                            const proxyEmail =
-                              localStorage.getItem('brandProxyEmail') ||
-                              localStorage.getItem('proxyEmail') ||
-                              localStorage.getItem('fromEmail') ||
-                              '';
-
-                            const brandName =
-                              localStorage.getItem('brandName') ||
-                              'CollabGlam';
-
-                            const campaignTitle =
-                              selectedCampaign?.campaignTitle ||
-                              campaignName ||
-                              'your campaign';
-
-                            const subject = `Invitation to Collaborate - ${brandName}`;
-
-                            const initialBody = `Dear ${displayName || displayHandle || 'Creator'},
-
-I hope you are doing well.
-
-We are reaching out to formally invite you to collaborate with ${brandName} for our upcoming campaign, "${campaignTitle}". Based on your creative work and audience alignment, we believe you would be an excellent fit for this project.
-
-Campaign Details
-
-Campaign Name: ${campaignTitle}
-Brand: ${brandName}
-Objective:
-Deliverables Required:
-Compensation:
-Campaign Timeline:
-
-To proceed, please review the full brief using the button below.
-
-If you have any questions or need further clarification, feel free to contact the brand or reach out to CollabGlam Support.
-
-We look forward to the opportunity of working together and hope to have you onboard for this campaign.
-
-Warm regards,
-Team CollabGlam`;
-
-                            const initialHtmlBody = `
-    <p>Dear ${displayName || displayHandle || 'Creator'},</p>
-    <p>I hope you are doing well.</p>
-    <p>
-      We are reaching out to formally invite you to collaborate with <strong>${brandName}</strong>
-      for our upcoming campaign, <strong>"${campaignTitle}"</strong>. Based on your creative work and
-      audience alignment, we believe you would be an excellent fit for this project.
-    </p>
-    <h3>Campaign Details</h3>
-    <p><strong>Campaign Name:</strong> ${campaignTitle}</p>
-    <p><strong>Brand:</strong> ${brandName}</p>
-    <p><strong>Objective:</strong></p>
-    <p><strong>Deliverables Required:</strong></p>
-    <p><strong>Compensation:</strong></p>
-    <p><strong>Campaign Timeline:</strong></p>
-    <p>To proceed, please review the full brief using the button below.</p>
-    <p>
-      If you have any questions or need further clarification, feel free to contact the brand
-      or reach out to CollabGlam Support.
-    </p>
-    <p>
-      We look forward to the opportunity of working together and hope to have you onboard for this campaign.
-    </p>
-    <p>Warm regards,<br /><strong>Team CollabGlam</strong></p>
-  `;
-
-                            setEmailDraft({
-                              campaignIds: activeInviteCampaignIds,
-                              fromEmail: proxyEmail,
-                              fromName: brandName,
-                              toLabel: displayHandle || handle || '',
-                              toEmail: '',
-                              missingEmailId: null,
-                              subject,
-                              initialBody,
-                              initialHtmlBody,
-                            });
-
-                            setCampaignPickerOpen(false);
-                            setEmailEditorOpen(true);
+                            void handleTemplatePreview(activeInviteCampaignIds);
                             return;
                           }
-                          effectiveHasEmail ? handleMessageNow(e) : handleSendInvitation(e);
+
+                          setCampaignPickerOpen((prev) => !prev);
                         }}
                         disabled={!canAct}
                         title={ctaTitle}
@@ -5125,7 +5387,7 @@ Team CollabGlam`;
                         onSearchChange={setCampaignSearch}
                         loading={campaignsLoading || checkingInvitation}
                         sending={sendingInvite}
-                        onSend={finalizeCampaignInvitations}
+                        onSend={handleTemplatePreview}
                       />
                     ) : null}
                   </div>
@@ -5136,12 +5398,47 @@ Team CollabGlam`;
 
             <div className="p-5">
               {isYouTubeMediaKitMode ? (
-                <YouTubeMediaKitPanelContent
-                  loading={youtubeMediaKitLoading}
-                  error={youtubeMediaKitError}
-                  data={youtubeMediaKit}
-                  fallbackReport={selectedReport}
-                />
+                <>
+                  <YouTubeMediaKitPanelContent
+                    loading={youtubeMediaKitLoading}
+                    error={youtubeMediaKitError}
+                    data={youtubeMediaKit}
+                    fallbackReport={selectedReport}
+                  />
+
+                  {!youtubeAdvancedRequested ? (
+                    <section className="mt-6 rounded-[26px] border border-[#f1e2c2] bg-[#fffdf9] p-6 shadow-sm">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#9a8a73]">
+                            Modash analytics
+                          </p>
+                          <h2 className="mt-1 text-[22px] font-black text-black">Advanced Analytics</h2>
+                          <p className="mt-1 text-sm leading-6 text-[#655b4d]">
+                            Click below to call the YouTube Modash report API and show graphs and insights.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleShowYouTubeAdvancedAnalytics}
+                          disabled={youtubeAdvancedLoading || !youtubeChannelIdForPanel}
+                          className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-black px-6 text-sm font-bold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <BarChart3 className="h-4 w-4" />
+                          Show Advanced Analytics
+                        </button>
+                      </div>
+                    </section>
+                  ) : (
+                    <YouTubeAdvancedAnalyticsPanel
+                      loading={youtubeAdvancedLoading}
+                      error={youtubeAdvancedError}
+                      report={youtubeAdvancedReport}
+                      fetchedAt={youtubeAdvancedFetchedAt}
+                    />
+                  )}
+                </>
               ) : (
                 <>
                   {panelLoading ? <LoadingState /> : null}
@@ -5281,8 +5578,8 @@ Team CollabGlam`;
         <EmailEditor
           open={emailEditorOpen}
           onClose={() => setEmailEditorOpen(false)}
-          toLabel={emailDraft?.toLabel || displayHandle || ''}
-          toEmail={emailDraft?.toEmail || ''}
+          toLabel={emailDraft?.toLabel || editorToLabel}
+          toEmail=""
           fromName={emailDraft?.fromName || 'CollabGlam'}
           fromEmail={emailDraft?.fromEmail || ''}
           toAvatar={selectedReport?.picture || primaryReport?.picture || ''}
