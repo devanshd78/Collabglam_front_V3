@@ -1092,7 +1092,7 @@ function CreatorAvatar({ creator, name }: { creator: Creator; name: string }) {
 }
 
 
-const INVITE_LOADING_ANIMALS = ["🦊", "🐼", "🦉", "🐰", "🐶", "🐯"];
+const INVITE_LOADING_ANIMALS = ["🤖", "⚙️", "💻", "📡", "🛰️", "⚡", "🔍"];
 const INVITE_LOADING_BACKGROUNDS = ["🎥", "🤝", "📊", "🎯", "✨", "🔎"];
 
 function InviteCreatorLoadingAnimation() {
