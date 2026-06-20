@@ -1092,7 +1092,7 @@ function CreatorAvatar({ creator, name }: { creator: Creator; name: string }) {
 }
 
 
-const INVITE_LOADING_ANIMALS = ["🤖", "🧠", "⚙️", "💻", "📡", "🛰️", "⚡", "🔍"];
+const INVITE_LOADING_ANIMALS = ["🦊", "🐼", "🦉", "🐰", "🐶", "🐯"];
 const INVITE_LOADING_BACKGROUNDS = ["🎥", "🤝", "📊", "🎯", "✨", "🔎"];
 
 function InviteCreatorLoadingAnimation() {
@@ -1733,7 +1733,14 @@ export default function InfluencerInvitationPage() {
         minimumInfluencers: INVITATION_CREATOR_LIMIT,
         minInfluencers: INVITATION_CREATOR_LIMIT,
         save: true,
-        strictCountry: true,
+        // Do not hard-block by campaign target country on the invite page.
+        // Some campaigns have uncommon target countries, so strict country filtering
+        // can return 0 creators. Backend will still prioritize exact matches first,
+        // then fill the list with relevant YouTube creators up to 50.
+        strictCountry: false,
+        strictTier: false,
+        allowFallbackCountries: true,
+        allowFallbackTier: true,
         fast: true,
         background: false,
       };
@@ -2483,7 +2490,7 @@ export default function InfluencerInvitationPage() {
                         <div className="flex shrink-0 items-center gap-3 self-end sm:self-center">
                           <div className="hidden min-w-[92px] text-right sm:block">
                             <p className="text-[10px] font-bold uppercase tracking-wide text-[#9a7a38]">
-                              Audience Authenticity
+                              Authenticity
                             </p>
                             <p className={`mt-0.5 text-[20px] font-black leading-none ${getAudienceAuthenticityColorClass(audienceAuthenticity)}`}>
                               {audienceAuthenticity !== null ? `${audienceAuthenticity}%` : "—"}
@@ -2500,7 +2507,7 @@ export default function InfluencerInvitationPage() {
                             }}
                           >
                             <Eye className="h-4 w-4" />
-                            Insights
+                            Media kit
                           </Button>
                         </div>
                       </div>
