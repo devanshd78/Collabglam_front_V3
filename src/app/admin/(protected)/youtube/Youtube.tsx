@@ -192,12 +192,16 @@ type GlobalSearchRecommendation = {
   instagramHandle?: string | null;
 };
 
+type SearchMode = "channel" | "script";
+
 type GlobalSearchData = {
   query: string;
   channelsFound: number;
   videoHits: number;
   nextPageToken?: string | null;
   hasMore?: boolean;
+  searchMode?: SearchMode;
+  jobId?: string | null;
   recommendations: GlobalSearchRecommendation[];
 };
 
@@ -207,6 +211,84 @@ type GlobalSearchResponse = {
   stored: false;
   query: string;
   data: GlobalSearchData;
+};
+
+type YouTubeBrowseCreator = {
+  channelId?: string;
+  channelName?: string;
+  channelUrl?: string;
+  thumbnail?: string;
+  subscribers?: number;
+  subscriberCount?: number;
+  country?: string;
+  estimatedAudienceCountry?: string;
+  primaryLanguage?: string;
+  totalVideos?: number;
+  totalLifetimeVideos?: number;
+  totalViews?: number;
+  totalLifetimeViews?: number;
+  description?: string;
+  channelDescription?: string;
+  handle?: string;
+  username?: string;
+  customUrl?: string;
+  category?: string;
+  channelCategory?: string;
+  channelTags?: string[];
+  sourceVideoTitle?: string;
+  sourceVideoUrl?: string;
+  foundViaQuery?: string;
+  avgViews?: number;
+  avgLikes?: number;
+  avgComments?: number;
+  engagementRate?: number;
+  recentUploadDate?: string;
+  recentVideoTitles?: Array<{
+    videoId?: string;
+    title?: string;
+    description?: string;
+    thumbnail?: string;
+    publishedAt?: string;
+    views?: number;
+    likes?: number;
+    comments?: number;
+    url?: string;
+  }>;
+  matchedVideos?: GlobalSearchVideo[];
+  scores?: {
+    shortlistScore?: number;
+    relevancyScore?: number;
+    engagementScore?: number;
+  };
+};
+
+type YouTubeCreatorsApiResponse = {
+  success?: boolean;
+  mode?: string;
+  jobId?: string;
+  processing?: boolean;
+  done?: boolean;
+  count?: number;
+  totalFound?: number;
+  target?: number;
+  warning?: string;
+  error?: string;
+  nextPageToken?: string | null;
+  hasMore?: boolean;
+  data?: YouTubeBrowseCreator[];
+  creators?: YouTubeBrowseCreator[];
+  recommendations?: YouTubeBrowseCreator[];
+  recommendedCreators?: YouTubeBrowseCreator[];
+};
+
+type CreatorQueueStatus = {
+  jobId: string;
+  processing: boolean;
+  done: boolean;
+  count: number;
+  totalFound: number;
+  target: number;
+  message: string;
 };
 
 type FolderDetailItem = {
@@ -360,6 +442,11 @@ const SORT_OPTIONS: Array<{ value: SavedSortValue; label: string }> = [
   { value: "uploads_per_week", label: "Uploads per Week" },
   { value: "newest", label: "Newest Channels" },
 ];
+
+const YOUTUBE_BROWSE_FETCH_LIMIT = 100;
+const YOUTUBE_BROWSE_MIN_RESULTS = 50;
+const YOUTUBE_BROWSE_MAX_POLLS = 64;
+const YOUTUBE_BROWSE_POLL_DELAY_MS = 1400;
 
 type ApiErrorLike = {
   message?: unknown;
@@ -613,6 +700,262 @@ function getThumbUrl(
   );
 }
 
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function normalizeSearchMode(value?: string | null): SearchMode {
+  return String(value || "").toLowerCase() === "script" ? "script" : "channel";
+}
+
+function getSearchModeLabel(mode: SearchMode) {
+  return mode === "script" ? "Discover Creator" : "Channel Search";
+}
+
+function getSearchModeApiFlags(mode?: SearchMode | string | null) {
+  const searchMode = normalizeSearchMode(mode);
+  const isChannelSearch = searchMode === "channel";
+
+  return {
+    searchMode,
+    source: isChannelSearch ? "youtube_api" : "app_script",
+    useScript: isChannelSearch ? "false" : "true",
+    skipScript: isChannelSearch ? "true" : "false",
+    skipAppsScript: isChannelSearch ? "true" : "false",
+    channelSearch: isChannelSearch ? "true" : "false",
+    scriptSearch: isChannelSearch ? "false" : "true",
+    fast: isChannelSearch ? "true" : "false",
+    background: isChannelSearch ? "false" : "true",
+    nonBlocking: isChannelSearch ? "false" : "true",
+    forceBackground: isChannelSearch ? "false" : "true",
+    directChannelSearch: isChannelSearch ? "true" : "false",
+    queue: isChannelSearch ? "false" : "true",
+    incremental: isChannelSearch ? "false" : "true",
+    strictCountry: "false",
+    batchSize: isChannelSearch ? "" : "1",
+  };
+}
+
+function getCreatorsFromApiResponse(response: YouTubeCreatorsApiResponse | null | undefined): YouTubeBrowseCreator[] {
+  if (!response) return [];
+
+  if (Array.isArray(response.data)) return response.data;
+  if (Array.isArray(response.creators)) return response.creators;
+  if (Array.isArray(response.recommendations)) return response.recommendations;
+  if (Array.isArray(response.recommendedCreators)) return response.recommendedCreators;
+
+  return [];
+}
+
+function getQueueStatusFromResponse(response: YouTubeCreatorsApiResponse): CreatorQueueStatus | null {
+  const jobId = String(response.jobId || "").trim();
+  if (!jobId) return null;
+
+  const count = getCreatorsFromApiResponse(response).length;
+  const totalFound = Number(response.totalFound || count || 0);
+  const target = Number(response.target || YOUTUBE_BROWSE_MIN_RESULTS);
+  const processing = Boolean(response.processing);
+  const done = Boolean(response.done) || !processing;
+
+  return {
+    jobId,
+    processing,
+    done,
+    count,
+    totalFound,
+    target,
+    message: done
+      ? `${count} creator${count === 1 ? "" : "s"} ready.`
+      : count > 0
+        ? `${count} creator${count === 1 ? "" : "s"} found so far.`
+        : "Finding the first creator match.",
+  };
+}
+
+function getBrowseCreatorKey(item: YouTubeBrowseCreator | GlobalSearchRecommendation) {
+  return String(
+    (item as any).channelId ||
+      (item as any).handle ||
+      (item as any).channelUrl ||
+      (item as any).title ||
+      (item as any).channelName ||
+      "",
+  )
+    .trim()
+    .toLowerCase();
+}
+
+function mergeGlobalRecommendations(
+  previous: GlobalSearchRecommendation[],
+  incoming: GlobalSearchRecommendation[],
+) {
+  if (!incoming.length) return previous;
+
+  const seen = new Set(previous.map(getBrowseCreatorKey));
+  const merged = [...previous];
+
+  incoming.forEach((item) => {
+    const key = getBrowseCreatorKey(item);
+    if (!key || seen.has(key)) return;
+
+    seen.add(key);
+    merged.push(item);
+  });
+
+  return merged;
+}
+
+function getHandleFromChannelUrl(value?: string | null) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/youtube\.com\/@([^/?#]+)/i);
+  return match?.[1] ? `@${match[1]}` : "";
+}
+
+function getBrowseCreatorHandle(item: YouTubeBrowseCreator) {
+  const raw = String(
+    item.handle ||
+      item.username ||
+      getHandleFromChannelUrl(item.channelUrl) ||
+      item.customUrl ||
+      "",
+  )
+    .replace(/^@+/, "")
+    .trim();
+
+  return raw ? `@${raw}` : null;
+}
+
+function buildBrowseThumbnails(item: YouTubeBrowseCreator) {
+  const image =
+    item.thumbnail ||
+    getThumbUrl((item as any).thumbnails) ||
+    (item as any).picture ||
+    "";
+
+  if (!image) return null;
+
+  return {
+    default: { url: image },
+    medium: { url: image },
+    high: { url: image },
+  };
+}
+
+function buildMatchedVideosFromBrowseCreator(item: YouTubeBrowseCreator) {
+  const directMatchedVideos = asList<GlobalSearchVideo>((item as any).matchedVideos);
+  if (directMatchedVideos.length) return directMatchedVideos;
+
+  const recentVideos = asList<any>(item.recentVideoTitles).slice(0, 4);
+  const mappedRecentVideos = recentVideos.map((video) => ({
+    videoId: video.videoId,
+    title: video.title,
+    description: video.description,
+    publishedAt: video.publishedAt,
+    channelId: item.channelId,
+    channelTitle: item.channelName,
+    thumbnails: video.thumbnail
+      ? {
+          default: { url: video.thumbnail },
+          medium: { url: video.thumbnail },
+          high: { url: video.thumbnail },
+        }
+      : null,
+    viewCount: video.views,
+    likeCount: video.likes,
+    commentCount: video.comments,
+    videoUrl: video.url,
+  }));
+
+  if (mappedRecentVideos.length) return mappedRecentVideos;
+
+  if (item.sourceVideoTitle || item.sourceVideoUrl) {
+    return [
+      {
+        title: item.sourceVideoTitle,
+        channelId: item.channelId,
+        channelTitle: item.channelName,
+        videoUrl: item.sourceVideoUrl || null,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function mapBrowseCreatorToGlobalRecommendation(
+  item: YouTubeBrowseCreator,
+): GlobalSearchRecommendation {
+  const topics = Array.from(
+    new Set(
+      [
+        item.category,
+        item.channelCategory,
+        ...(Array.isArray(item.channelTags) ? item.channelTags : []),
+        item.foundViaQuery,
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  return {
+    channelId: item.channelId || null,
+    title: item.channelName || (item as any).title || getBrowseCreatorHandle(item) || "Creator",
+    description: item.description || item.channelDescription || "",
+    handle: getBrowseCreatorHandle(item),
+    customUrl: item.customUrl || null,
+    country: item.country || item.estimatedAudienceCountry || null,
+    thumbnails: buildBrowseThumbnails(item),
+    subscriberCount: Number(item.subscribers || item.subscriberCount || 0) || null,
+    totalViewCount: Number(item.totalViews || item.totalLifetimeViews || 0) || null,
+    totalVideoCount: Number(item.totalVideos || item.totalLifetimeVideos || 0) || null,
+    topicLabels: topics,
+    channelUrl: item.channelUrl || ytChannelUrlFromHandleOrId(getBrowseCreatorHandle(item), item.channelId),
+    matchedByDirectChannelSearch: true,
+    matchedVideos: buildMatchedVideosFromBrowseCreator(item),
+    score: Number(item.scores?.shortlistScore || item.scores?.relevancyScore || 0) || undefined,
+    avgViewsLast15: Number(item.avgViews || 0) || null,
+    engagementRateLast15: item.engagementRate != null ? Number(item.engagementRate) / 100 : null,
+    uploadFrequencyPerWeek: (item as any).uploadFrequencyPerWeek ?? null,
+    avgDaysBetweenUploads: (item as any).avgDaysBetweenUploads ?? null,
+    lastUploadAt: item.recentUploadDate || null,
+    defaultLanguage: item.primaryLanguage || null,
+    instagramHandle: (item as any).instagram || (item as any).instagramHandle || null,
+  };
+}
+
+function buildGlobalResultFromBrowseResponse(
+  rawQuery: string,
+  searchMode: SearchMode,
+  response: YouTubeCreatorsApiResponse,
+  previousRecommendations: GlobalSearchRecommendation[] = [],
+): GlobalSearchData {
+  const nextRecommendations = getCreatorsFromApiResponse(response).map(
+    mapBrowseCreatorToGlobalRecommendation,
+  );
+  const recommendations = mergeGlobalRecommendations(
+    previousRecommendations,
+    nextRecommendations,
+  );
+
+  const matchedVideoCount = recommendations.reduce(
+    (total, item) => total + asList<GlobalSearchVideo>(item.matchedVideos).length,
+    0,
+  );
+
+  return {
+    query: rawQuery,
+    channelsFound: Number(response.totalFound || response.count || recommendations.length),
+    videoHits: matchedVideoCount,
+    nextPageToken: response.nextPageToken || null,
+    hasMore: Boolean(response.hasMore),
+    searchMode,
+    jobId: response.jobId || null,
+    recommendations,
+  };
+}
+
 function topicFromUrl(url: string) {
   try {
     const last = (url || "").split("/").pop() || "";
@@ -804,7 +1147,7 @@ function MultiCountrySelect({
             >
               <div className="border-b border-slate-200 p-3">
                 <input
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-transparent focus:ring-2 focus:ring-slate-900"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   placeholder="Search country"
@@ -973,7 +1316,7 @@ function FolderSelect({
             >
               <div className="border-b border-slate-200 p-3">
                 <input
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-transparent focus:ring-2 focus:ring-slate-900"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   placeholder="Search folder"
@@ -1007,7 +1350,7 @@ function FolderSelect({
                         setOpen(false);
                       }}
                       className={`flex w-full items-start justify-between gap-3 rounded-lg px-3 py-3 text-left hover:bg-slate-50 ${
-                        checked ? "bg-blue-50" : ""
+                        checked ? "bg-slate-100" : ""
                       }`}
                     >
                       <div className="min-w-0">
@@ -1020,7 +1363,7 @@ function FolderSelect({
                       </div>
 
                       {checked ? (
-                        <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[10px] text-white">
+                        <span className="rounded-full bg-black px-2 py-0.5 text-[10px] text-white">
                           Selected
                         </span>
                       ) : null}
@@ -1125,7 +1468,7 @@ function GlobalSearchCard({
                 </h3>
 
                 {item.country ? (
-                  <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] text-blue-700">
+                  <span className="rounded-full border border-black bg-black px-2 py-0.5 text-[10px] text-white">
                     {item.country}
                   </span>
                 ) : null}
@@ -1138,7 +1481,7 @@ function GlobalSearchCard({
               </div>
 
               <div className="mt-2 flex flex-wrap items-center gap-3">
-                <div className="text-lg font-semibold text-blue-600">
+                <div className="text-lg font-semibold text-black">
                   {item.handle || "No public handle"}
                 </div>
 
@@ -1200,7 +1543,7 @@ function GlobalSearchCard({
             {savedProfile?.handleId ? (
               <button
                 type="button"
-                className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+                className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-900"
                 onClick={() => onOpenSaved(savedProfile.handleId)}
               >
                 Open Saved Profile
@@ -1208,7 +1551,7 @@ function GlobalSearchCard({
             ) : (
               <button
                 type="button"
-                className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                className="w-full rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-900 disabled:opacity-50"
                 onClick={() =>
                   onViewDetails({
                     handle: item.handle || undefined,
@@ -1278,7 +1621,7 @@ function GlobalSearchCard({
                   rel={url ? "noreferrer" : undefined}
                   className={`block rounded-2xl border border-slate-200 bg-white p-4 transition-all ${
                     url
-                      ? "hover:border-blue-300 hover:bg-blue-50/30 hover:shadow-md"
+                      ? "hover:border-black hover:bg-slate-50 hover:shadow-md"
                       : ""
                   }`}
                 >
@@ -1307,7 +1650,7 @@ function GlobalSearchCard({
                         </div>
 
                         {url ? (
-                          <div className="shrink-0 text-blue-600">
+                          <div className="shrink-0 text-black">
                             <ExternalLink className="h-4 w-4" />
                           </div>
                         ) : null}
@@ -1407,7 +1750,7 @@ function PreviewSidebar({
                   </h3>
 
                   {data?.country ? (
-                    <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] text-blue-700">
+                    <span className="rounded-full border border-black bg-black px-2.5 py-1 text-[11px] text-white">
                       {data.country}
                     </span>
                   ) : null}
@@ -1419,7 +1762,7 @@ function PreviewSidebar({
                   ) : null}
                 </div>
 
-                <div className="mt-1 text-base font-semibold text-blue-600">
+                <div className="mt-1 text-base font-semibold text-black">
                   {data?.handle || "—"}
                 </div>
 
@@ -1514,7 +1857,7 @@ function PreviewSidebar({
                         href={channelUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700"
+                        className="inline-flex items-center gap-2 text-sm font-semibold text-black hover:text-slate-800"
                       >
                         <ExternalLink className="h-4 w-4" />
                         Open channel
@@ -1562,7 +1905,7 @@ function PreviewSidebar({
                             rel={videoUrl ? "noreferrer" : undefined}
                             className={`block rounded-2xl border border-slate-200 bg-white p-4 transition-all ${
                               videoUrl
-                                ? "hover:border-blue-300 hover:bg-blue-50/30 hover:shadow-md"
+                                ? "hover:border-black hover:bg-slate-50 hover:shadow-md"
                                 : ""
                             }`}
                           >
@@ -1618,7 +1961,7 @@ function PreviewSidebar({
                                   </div>
 
                                   {videoUrl ? (
-                                    <div className="shrink-0 text-blue-600">
+                                    <div className="shrink-0 text-black">
                                       <ExternalLink className="h-4 w-4" />
                                     </div>
                                   ) : null}
@@ -1648,7 +1991,7 @@ function PreviewSidebar({
           ) : (
             <button
               type="button"
-              className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+              className="rounded-xl bg-black px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-900 disabled:opacity-50"
               onClick={onSave}
               disabled={loading || saving || !data}
             >
@@ -1684,6 +2027,9 @@ export default function YoutubePage() {
   const [hasNext, setHasNext] = useState(false);
 
   const [query, setQuery] = useState("");
+  const [searchMode, setSearchMode] = useState<SearchMode>("channel");
+  const [searchModeDropdownOpen, setSearchModeDropdownOpen] = useState(false);
+  const [scriptQueueStatus, setScriptQueueStatus] = useState<CreatorQueueStatus | null>(null);
   const [searchHint, setSearchHint] = useState("");
   const [searchLoading, setSearchLoading] = useState(false);
   const [listLoading, setListLoading] = useState(false);
@@ -1772,6 +2118,8 @@ export default function YoutubePage() {
 
   const typeSearchRef = useRef<any>(null);
   const filtersActiveRef = useRef(filtersActive);
+  const searchModeDropdownRef = useRef<HTMLDivElement | null>(null);
+  const scriptSearchRunRef = useRef(0);
 
   const visibleLiveRecommendations = useMemo(
     () => globalResult?.recommendations.slice(0, globalVisibleCount) || [],
@@ -1932,6 +2280,33 @@ export default function YoutubePage() {
   }, []);
 
   useEffect(() => {
+    if (!searchModeDropdownOpen) return;
+
+    function handleDocumentMouseDown(event: MouseEvent) {
+      const target = event.target as Node | null;
+      if (
+        target &&
+        searchModeDropdownRef.current &&
+        !searchModeDropdownRef.current.contains(target)
+      ) {
+        setSearchModeDropdownOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setSearchModeDropdownOpen(false);
+    }
+
+    document.addEventListener("mousedown", handleDocumentMouseDown);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentMouseDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [searchModeDropdownOpen]);
+
+  useEffect(() => {
     if (
       filterModalOpen ||
       detailsModalOpen ||
@@ -1971,6 +2346,82 @@ export default function YoutubePage() {
     if (f.lastUploadDays) out.lastUploadDays = Number(f.lastUploadDays);
 
     return out;
+  }
+
+  function buildYoutubeBrowseCreatorParams(
+    rawQuery: string,
+    active: InfluencerFilters,
+    mode: SearchMode,
+    pageToken = "",
+  ) {
+    const params = new URLSearchParams();
+    const apiFlags = getSearchModeApiFlags(mode);
+
+    Object.entries(apiFlags).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && String(value).trim() !== "") {
+        params.set(key, String(value));
+      }
+    });
+
+    params.set("keyword", rawQuery);
+    params.set("page", "1");
+    params.set("limit", String(YOUTUBE_BROWSE_FETCH_LIMIT));
+    params.set("frontendPagination", "true");
+    params.set("minimumResults", String(YOUTUBE_BROWSE_MIN_RESULTS));
+
+    if (campaignId) params.set("campaignId", campaignId);
+    if (active.category) params.set("category", active.category);
+    if (active.avgViewsMin) params.set("minAvgViews", String(active.avgViewsMin));
+    if (active.sortBy && active.sortBy !== "relevance") params.set("sort", active.sortBy);
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const selectedCountry = Array.isArray(active.countries) ? active.countries[0] : "";
+    if (selectedCountry) {
+      params.set("country", selectedCountry);
+      params.set("strictCountry", "true");
+    }
+
+    if (active.subscriberRange) {
+      const range = SUBSCRIBER_RANGES.find(
+        (item) => item.value === active.subscriberRange,
+      );
+
+      if (range?.min != null) params.set("minSubscribers", String(range.min));
+      if (range?.max != null) params.set("maxSubscribers", String(range.max));
+    }
+
+    return params;
+  }
+
+  async function fetchYoutubeBrowseCreators(
+    rawQuery: string,
+    active: InfluencerFilters,
+    mode: SearchMode,
+    pageToken = "",
+  ) {
+    const params = buildYoutubeBrowseCreatorParams(rawQuery, active, mode, pageToken);
+    const resp = await get<YouTubeCreatorsApiResponse>(
+      `/youtube-data/creators?${params.toString()}`,
+    );
+
+    if (resp?.success === false) {
+      throw new Error(resp.error || resp.warning || "Failed to load YouTube creators");
+    }
+
+    return resp;
+  }
+
+  async function fetchYoutubeBrowseQueue(jobId: string) {
+    const params = new URLSearchParams({ jobId });
+    const resp = await get<YouTubeCreatorsApiResponse>(
+      `/youtube-data/creators?${params.toString()}`,
+    );
+
+    if (resp?.success === false) {
+      throw new Error(resp.error || resp.warning || "Failed to load queued creators");
+    }
+
+    return resp;
   }
 
   function buildSelectedYoutubeUsers() {
@@ -2079,33 +2530,97 @@ export default function YoutubePage() {
   async function runGlobalSearch(
     rawQuery: string,
     active: InfluencerFilters = filtersActiveRef.current,
+    mode: SearchMode = searchMode,
   ) {
+    const activeSearchMode = normalizeSearchMode(mode);
+    const runId = scriptSearchRunRef.current + 1;
+    scriptSearchRunRef.current = runId;
+
     setSearchLoading(true);
+    setScriptQueueStatus(null);
+
     try {
-      const resp = await post<GlobalSearchResponse>("/youtube/search", {
-        query: rawQuery,
-        channelLimit: 50,
-        videoLimit: 50,
-        pageToken: "",
-        ...buildFilterPayload(active),
-      });
+      const firstResponse = await fetchYoutubeBrowseCreators(
+        rawQuery,
+        active,
+        activeSearchMode,
+      );
 
-      if (resp?.status !== "ok") throw new Error("Global search failed");
+      if (scriptSearchRunRef.current !== runId) return;
 
-      setGlobalResult(resp.data);
+      const firstResult = buildGlobalResultFromBrowseResponse(
+        rawQuery,
+        activeSearchMode,
+        firstResponse,
+      );
+
+      setGlobalResult(firstResult);
       setGlobalVisibleCount(10);
-      setGlobalNextPageToken(resp.data.nextPageToken || null);
-      setGlobalHasMore(!!resp.data.hasMore);
+      setGlobalNextPageToken(firstResult.nextPageToken || null);
+      setGlobalHasMore(!!firstResult.hasMore);
+
+      const firstStatus = getQueueStatusFromResponse(firstResponse);
+      if (firstStatus) setScriptQueueStatus(firstStatus);
+
+      const jobId = String(firstResponse.jobId || "").trim();
+      const isQueued = Boolean(activeSearchMode === "script" && jobId && firstResponse.processing);
+
+      if (!isQueued) {
+        setSearchHint(
+          firstResult.recommendations.length
+            ? `Found ${formatNumber(firstResult.channelsFound)} creators using ${getSearchModeLabel(activeSearchMode)}.`
+            : "No live YouTube results found.",
+        );
+        return;
+      }
+
+      setSearchHint("Running discovery script. Results will appear as creators are returned.");
+
+      let latestResponse = firstResponse;
+      let latestRecommendations = firstResult.recommendations;
+      let pollCount = 0;
+
+      while (
+        scriptSearchRunRef.current === runId &&
+        Boolean(latestResponse.processing) &&
+        pollCount < YOUTUBE_BROWSE_MAX_POLLS
+      ) {
+        await wait(YOUTUBE_BROWSE_POLL_DELAY_MS);
+        if (scriptSearchRunRef.current !== runId) return;
+
+        latestResponse = await fetchYoutubeBrowseQueue(jobId);
+        const nextResult = buildGlobalResultFromBrowseResponse(
+          rawQuery,
+          activeSearchMode,
+          latestResponse,
+          latestRecommendations,
+        );
+
+        latestRecommendations = nextResult.recommendations;
+
+        setGlobalResult(nextResult);
+        setGlobalVisibleCount((value) => Math.max(value, Math.min(10, nextResult.recommendations.length || 10)));
+        setGlobalNextPageToken(nextResult.nextPageToken || null);
+        setGlobalHasMore(!!nextResult.hasMore);
+
+        const nextStatus = getQueueStatusFromResponse(latestResponse);
+        if (nextStatus) setScriptQueueStatus(nextStatus);
+
+        if (!latestResponse.processing || latestResponse.done) break;
+        pollCount += 1;
+      }
 
       setSearchHint(
-        resp.data.recommendations?.length
-          ? `Found ${formatNumber(resp.data.channelsFound)} creators in this batch. Filters are applied to live search too.`
+        latestRecommendations.length
+          ? `Found ${formatNumber(latestRecommendations.length)} creators using ${getSearchModeLabel(activeSearchMode)}.`
           : "No live YouTube results found.",
       );
     } catch (e: any) {
       showErrorToast("YouTube search failed", e, "Failed to search YouTube.");
     } finally {
-      setSearchLoading(false);
+      if (scriptSearchRunRef.current === runId) {
+        setSearchLoading(false);
+      }
     }
   }
 
@@ -2124,52 +2639,25 @@ export default function YoutubePage() {
 
     setGlobalLoadingMore(true);
     try {
-      const resp = await post<GlobalSearchResponse>("/youtube/search", {
-        query: globalResult.query,
-        channelLimit: 50,
-        videoLimit: 50,
-        pageToken: globalNextPageToken,
-        ...buildFilterPayload(filtersActiveRef.current),
-      });
-
-      if (resp?.status !== "ok")
-        throw new Error("Failed to load more search results");
-
-      const nextItems = asList<GlobalSearchRecommendation>(
-        resp.data.recommendations,
+      const activeSearchMode = normalizeSearchMode(globalResult.searchMode || searchMode);
+      const response = await fetchYoutubeBrowseCreators(
+        globalResult.query,
+        filtersActiveRef.current,
+        activeSearchMode,
+        globalNextPageToken,
       );
 
-      setGlobalResult((prev) => {
-        if (!prev) return prev;
+      const nextResult = buildGlobalResultFromBrowseResponse(
+        globalResult.query,
+        activeSearchMode,
+        response,
+        globalResult.recommendations,
+      );
 
-        const seen = new Set(
-          prev.recommendations.map(
-            (x) => `${x.channelId || ""}::${x.handle || ""}`,
-          ),
-        );
-        const merged = [...prev.recommendations];
-
-        for (const item of nextItems) {
-          const key = `${item.channelId || ""}::${item.handle || ""}`;
-          if (!seen.has(key)) {
-            merged.push(item);
-            seen.add(key);
-          }
-        }
-
-        return {
-          ...prev,
-          channelsFound: merged.length,
-          videoHits: resp.data.videoHits || prev.videoHits,
-          nextPageToken: resp.data.nextPageToken || null,
-          hasMore: !!resp.data.hasMore,
-          recommendations: merged,
-        };
-      });
-
+      setGlobalResult(nextResult);
       setGlobalVisibleCount((v) => v + 10);
-      setGlobalNextPageToken(resp.data.nextPageToken || null);
-      setGlobalHasMore(!!resp.data.hasMore);
+      setGlobalNextPageToken(nextResult.nextPageToken || null);
+      setGlobalHasMore(!!nextResult.hasMore);
     } catch (e: any) {
       showErrorToast("Load more failed", e, "Failed to load more results.");
     } finally {
@@ -2416,9 +2904,11 @@ export default function YoutubePage() {
     }
 
     setSearchHint(
-      "Keyword search runs live on YouTube. Use View Details to fetch full creator data, then save only if needed.",
+      searchMode === "script"
+        ? "Discover Creator uses the same discovery script flow as YouTube Browse. Use View Details to fetch full creator data, then save only if needed."
+        : "Channel Search uses the same direct YouTube API flow as YouTube Browse. Use View Details to fetch full creator data, then save only if needed.",
     );
-  }, [query, searchIntent, profilesByHandle]);
+  }, [query, searchIntent, profilesByHandle, searchMode]);
 
   function upsertProfile(doc: InfluencerProfileDoc) {
     setProfiles((prev) => {
@@ -2466,6 +2956,8 @@ export default function YoutubePage() {
     clearSelection();
 
     if (searchIntent.isHandle) {
+      setScriptQueueStatus(null);
+
       if (existingProfile?.handleId) {
         setGlobalResult(null);
         openAndScrollTo(existingProfile.handleId);
@@ -2476,7 +2968,7 @@ export default function YoutubePage() {
       return;
     }
 
-    await runGlobalSearch(raw);
+    await runGlobalSearch(raw, filtersActiveRef.current, searchMode);
   }
 
   async function saveDetails() {
@@ -2519,7 +3011,7 @@ export default function YoutubePage() {
     loadSaved(1, next, buildSavedSearchText(query));
 
     if (query.trim() && !searchIntent.isHandle) {
-      runGlobalSearch(query.trim(), next);
+      runGlobalSearch(query.trim(), next, searchMode);
     }
 
     setFilterModalOpen(false);
@@ -2544,7 +3036,7 @@ export default function YoutubePage() {
     loadSaved(1, empty, buildSavedSearchText(query));
 
     if (query.trim() && !searchIntent.isHandle) {
-      runGlobalSearch(query.trim(), empty);
+      runGlobalSearch(query.trim(), empty, searchMode);
     }
 
     setFilterModalOpen(false);
@@ -2582,7 +3074,7 @@ export default function YoutubePage() {
             ) : null}
           </div>
 
-          <div className="mb-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="relative z-30 mb-6 overflow-visible rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 bg-gradient-to-r from-slate-50 via-white to-slate-50 px-6 py-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
@@ -2636,31 +3128,84 @@ export default function YoutubePage() {
                       Search keywords or explicit handles
                     </label>
 
-                    <div className="relative">
-                      <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-                      <input
-                        className="w-full rounded-xl border border-slate-300 bg-white py-3.5 pl-12 pr-4 outline-none transition-all focus:border-transparent focus:ring-2 focus:ring-blue-500"
-                        value={query}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setQuery(v);
+                    <div className="flex min-h-[52px] rounded-xl border border-slate-300 bg-white transition-all focus-within:border-transparent focus-within:ring-2 focus-within:ring-slate-900">
+                      <div
+                        ref={searchModeDropdownRef}
+                        className="relative flex shrink-0 items-center border-r border-slate-200"
+                      >
+                        <button
+                          type="button"
+                          className="flex h-full items-center gap-2 rounded-l-xl px-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50"
+                          onClick={() => setSearchModeDropdownOpen((value) => !value)}
+                        >
+                          <span className="whitespace-nowrap">
+                            {getSearchModeLabel(searchMode)}
+                          </span>
+                          <ChevronDown
+                            className={`h-4 w-4 text-slate-500 transition-transform ${
+                              searchModeDropdownOpen ? "rotate-180" : ""
+                            }`}
+                          />
+                        </button>
 
-                          if (typeSearchRef.current)
-                            clearTimeout(typeSearchRef.current);
+                        {searchModeDropdownOpen ? (
+                          <div className="absolute left-0 top-[calc(100%+8px)] z-[999] w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-[0_18px_45px_rgba(15,23,42,0.18)]">
+                            {([
+                              ["channel", "Channel Search"],
+                              ["script", "Discover Creator"],
+                            ] as Array<[SearchMode, string]>).map(([mode, label]) => {
+                              const active = searchMode === mode;
 
-                          typeSearchRef.current = setTimeout(() => {
-                            const searchText = buildSavedSearchText(v);
-                            loadSaved(1, filtersActiveRef.current, searchText);
-                          }, 350);
-                        }}
-                        placeholder="e.g. powerstation reviews, tech creator, @MrBeast"
-                      />
+                              return (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                                    active
+                                      ? "bg-slate-900 text-white"
+                                      : "text-slate-700 hover:bg-slate-100"
+                                  }`}
+                                  onClick={() => {
+                                    setSearchMode(mode);
+                                    setSearchModeDropdownOpen(false);
+                                    setScriptQueueStatus(null);
+                                  }}
+                                >
+                                  <span>{label}</span>
+                                  {active ? <span className="text-xs">✓</span> : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="relative min-w-0 flex-1">
+                        <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                        <input
+                          className="h-full w-full rounded-r-xl border-0 bg-transparent py-3.5 pl-12 pr-4 outline-none"
+                          value={query}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setQuery(v);
+
+                            if (typeSearchRef.current)
+                              clearTimeout(typeSearchRef.current);
+
+                            typeSearchRef.current = setTimeout(() => {
+                              const searchText = buildSavedSearchText(v);
+                              loadSaved(1, filtersActiveRef.current, searchText);
+                            }, 350);
+                          }}
+                          placeholder="e.g. powerstation reviews, tech creator, @MrBeast"
+                        />
+                      </div>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:col-span-5">
                     <button
-                      className="flex h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="flex h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-black px-5 font-semibold text-white shadow-sm transition-colors hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
                       type="submit"
                       disabled={searchLoading}
                     >
@@ -2675,6 +3220,8 @@ export default function YoutubePage() {
                         ) : (
                           "Preview Creator"
                         )
+                      ) : searchMode === "script" ? (
+                        "Discover Creator"
                       ) : (
                         "Search"
                       )}
@@ -2713,9 +3260,15 @@ export default function YoutubePage() {
                 {searchHint ? (
                   <div className="mt-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
                     <div className="mt-0.5">
-                      <Info className="h-5 w-5 text-slate-500" />
+                      {searchLoading && searchMode === "script" ? (
+                        <RefreshCw className="h-5 w-5 animate-spin text-slate-500" />
+                      ) : (
+                        <Info className="h-5 w-5 text-slate-500" />
+                      )}
                     </div>
-                    <p className="text-sm text-slate-700">{searchHint}</p>
+                    <p className="text-sm text-slate-700">
+                      {scriptQueueStatus?.message || searchHint}
+                    </p>
                   </div>
                 ) : null}
               </div>
@@ -2803,6 +3356,7 @@ export default function YoutubePage() {
                     onClick={() => {
                       clearAllLive(visibleLiveRecommendations);
                       setGlobalResult(null);
+                      setScriptQueueStatus(null);
                     }}
                   >
                     Clear Results
@@ -3000,14 +3554,14 @@ export default function YoutubePage() {
                                 ) : null}
 
                                 {p.country ? (
-                                  <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] text-blue-700">
+                                  <span className="rounded-full border border-black bg-black px-2 py-0.5 text-[10px] text-white">
                                     {p.country}
                                   </span>
                                 ) : null}
                               </div>
 
                               <div className="mt-2 flex flex-wrap items-center gap-3">
-                                <div className="text-lg font-semibold text-blue-600">
+                                <div className="text-lg font-semibold text-black">
                                   {p.handle || "—"}
                                 </div>
 
@@ -3092,7 +3646,7 @@ export default function YoutubePage() {
 
                             <button
                               type="button"
-                              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+                              className="flex w-full items-center justify-center gap-2 rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-900"
                               onClick={() => openDetailsModal(p)}
                             >
                               <Mail className="h-4 w-4" />
@@ -3189,7 +3743,7 @@ export default function YoutubePage() {
                                     href={ytVideoUrl(p.lastVideoId)}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="inline-flex items-center gap-2 text-sm font-semibold text-blue-600 hover:text-blue-700"
+                                    className="inline-flex items-center gap-2 text-sm font-semibold text-black hover:text-slate-800"
                                   >
                                     <ExternalLink className="h-4 w-4" />
                                     Watch latest video
@@ -3346,7 +3900,7 @@ export default function YoutubePage() {
                       Subscribers Range
                     </label>
                     <select
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-slate-900"
                       value={filtersDraft.subscriberRange}
                       onChange={(e) =>
                         setFiltersDraft((p) => ({
@@ -3380,7 +3934,7 @@ export default function YoutubePage() {
                       Category
                     </label>
                     <select
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-slate-900"
                       value={filtersDraft.category}
                       onChange={(e) =>
                         setFiltersDraft((p) => ({
@@ -3403,7 +3957,7 @@ export default function YoutubePage() {
                       Average Views
                     </label>
                     <select
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-slate-900"
                       value={filtersDraft.avgViewsMin}
                       onChange={(e) =>
                         setFiltersDraft((p) => ({
@@ -3425,7 +3979,7 @@ export default function YoutubePage() {
                       Last Upload
                     </label>
                     <select
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-slate-900"
                       value={filtersDraft.lastUploadDays}
                       onChange={(e) =>
                         setFiltersDraft((p) => ({
@@ -3447,7 +4001,7 @@ export default function YoutubePage() {
                       Sort By
                     </label>
                     <select
-                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                      className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-transparent focus:ring-2 focus:ring-slate-900"
                       value={filtersDraft.sortBy}
                       onChange={(e) =>
                         setFiltersDraft((p) => ({
@@ -3478,7 +4032,7 @@ export default function YoutubePage() {
 
                 <button
                   type="button"
-                  className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                  className="rounded-xl bg-black px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-900"
                   onClick={applyFilters}
                   disabled={listLoading}
                 >
@@ -3516,7 +4070,7 @@ export default function YoutubePage() {
                   Email Address
                 </label>
                 <input
-                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-transparent focus:ring-2 focus:ring-slate-900"
                   value={detailsForm.email}
                   onChange={(e) => setDetailsForm({ email: e.target.value })}
                   placeholder="brand@domain.com"
@@ -3533,7 +4087,7 @@ export default function YoutubePage() {
                   Cancel
                 </button>
                 <button
-                  className="flex-1 rounded-xl bg-blue-600 px-4 py-3 font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex-1 rounded-xl bg-black px-4 py-3 font-medium text-white transition-colors hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={saveDetails}
                   disabled={detailsSaving}
                 >
@@ -3579,7 +4133,7 @@ export default function YoutubePage() {
                   value={previewEmail}
                   onChange={(e) => setPreviewEmail(e.target.value)}
                   placeholder="brand@domain.com"
-                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-transparent focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition-all focus:border-transparent focus:ring-2 focus:ring-slate-900"
                   autoFocus
                 />
 
@@ -3605,7 +4159,7 @@ export default function YoutubePage() {
 
                 <button
                   type="button"
-                  className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="flex-1 rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white hover:bg-slate-900 disabled:opacity-50"
                   onClick={() => savePreviewProfile(previewEmail)}
                   disabled={previewSaving}
                 >
